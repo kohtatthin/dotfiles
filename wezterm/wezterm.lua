@@ -2,6 +2,9 @@ local wezterm = require 'wezterm'
 local mux = wezterm.mux
 local config = {}
 
+-- OS判定
+local is_windows = wezterm.target_triple:find('windows') ~= nil
+
 -- 最大化で起動
 wezterm.on('gui-startup', function(cmd)
   local tab, pane, window = mux.spawn_window(cmd or {})
@@ -34,23 +37,39 @@ config.color_scheme = 'Tokyo Night'
 config.automatically_reload_config = true
 config.font = wezterm.font('UDEV Gothic NF')
 config.font_size = 12
-config.default_prog = { 'powershell.exe' }
-config.default_cwd = 'C:/claude'
-config.initial_cols = 200  -- 横の文字数
-config.initial_rows = 50   -- 縦の行数
+config.initial_cols = 200
+config.initial_rows = 50
 
--- 背景画像設定
-config.background = {
-  {
-    source = { File = 'C:/Users/sss-0/OneDrive - トリプルエス株式会社/画像/壁紙/wallhaven-xlpv8v.jpg' },
-    hsb = { brightness = 0.1 },
-    opacity = 0.9,
-    horizontal_align = 'Center',
-    vertical_align = 'Middle',
-    repeat_x = 'NoRepeat',
-    repeat_y = 'NoRepeat',
-  },
-}
+-- OS別設定
+if is_windows then
+  config.default_prog = { 'powershell.exe' }
+  config.default_cwd = 'C:/claude'
+  config.background = {
+    {
+      source = { File = 'C:/Users/sss-0/OneDrive - トリプルエス株式会社/画像/壁紙/wallhaven-xlpv8v.jpg' },
+      hsb = { brightness = 0.1 },
+      opacity = 0.9,
+      horizontal_align = 'Center',
+      vertical_align = 'Middle',
+      repeat_x = 'NoRepeat',
+      repeat_y = 'NoRepeat',
+    },
+  }
+else
+  -- Mac
+  config.default_cwd = wezterm.home_dir
+  config.background = {
+    {
+      source = { File = wezterm.home_dir .. '/Pictures/wezterm/wallhaven-lmjgpr.jpg' },
+      hsb = { brightness = 0.1 },
+      opacity = 0.9,
+      horizontal_align = 'Center',
+      vertical_align = 'Middle',
+      repeat_x = 'NoRepeat',
+      repeat_y = 'NoRepeat',
+    },
+  }
+end
 
 -- キーバインド
 config.keys = {
