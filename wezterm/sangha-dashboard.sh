@@ -1,11 +1,11 @@
 #!/bin/bash
 # ============================================
-#  Sangha Dashboard v1.3 (macOS/Linux)
+#  Sangha Dashboard v1.4 (macOS/Linux)
 #  WezTerm Pane Dashboard with Todoist + Clock
 # ============================================
 
 # --- Configuration ---
-API_KEY="YOUR_API_KEY_HERE"  # Todoist APIキーを貼る
+API_KEY="${TODOIST_API_KEY:-}"  # 環境変数から読み込み
 INTERVAL=60
 THM="tokyo-night"
 
@@ -100,6 +100,19 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
+# --- API Key Check ---
+if [ -z "$API_KEY" ]; then
+    echo ""
+    echo "  ${C_error}${B}⚠ TODOIST_API_KEY が未設定です${R}"
+    echo ""
+    echo "  ${C_fg}以下を ~/.zshrc に追加してください:${R}"
+    echo "  ${C_cyan}export TODOIST_API_KEY=\"your-api-key\"${R}"
+    echo ""
+    echo "  ${C_dim}設定後、source ~/.zshrc を実行${R}"
+    echo ""
+    sleep 5
+fi
+
 # --- Main Loop ---
 while true; do
     # --- Fetch Todoist tasks ---
@@ -107,7 +120,7 @@ while true; do
     completed_count=0
     task_count=0
 
-    if [ "$API_KEY" != "YOUR_API_KEY_HERE" ]; then
+    if [ -n "$API_KEY" ]; then
         tasks_json=$(curl -s -H "Authorization: Bearer $API_KEY" \
             "https://api.todoist.com/rest/v2/tasks?filter=today%7Coverdue" 2>/dev/null)
 
@@ -130,21 +143,23 @@ while true; do
 
     # Header
     echo ""
-    echo "  ${C_accent}${B}  Sangha Dashboard${R}"
+    echo "  ${C_accent}${B}☸ Sangha Dashboard${R}"
     echo "  ${SEP}"
     echo ""
-    echo "  ${C_highlight}${B}  ${time_str}${R}"
-    echo "  ${C_fg}  ${date_str}${R}"
+    echo "  ${C_highlight}${B}⏰ ${time_str}${R}"
+    echo "  ${C_fg}📅 ${date_str}${R}"
     echo ""
     echo "  ${SEP}"
 
     # Tasks
     echo ""
-    echo "  ${C_cyan}${B}  Today's Tasks${R}"
+    echo "  ${C_cyan}${B}📋 Today's Tasks${R}"
     echo ""
 
-    if [ "$task_count" -eq 0 ] 2>/dev/null; then
-        echo "  ${C_success}  All clear!${R}"
+    if [ -z "$API_KEY" ]; then
+        echo "  ${C_warning}  API未設定 - 時計のみ表示中${R}"
+    elif [ "$task_count" -eq 0 ] 2>/dev/null; then
+        echo "  ${C_success}✅ All clear!${R}"
     else
         echo "$tasks_json" | python3 -c "
 import sys, json
@@ -189,7 +204,7 @@ if len(tasks) > 12:
     # Handle zero case
     [ "$fill" -eq 0 ] && f_bar=""
     [ "$empty" -eq 0 ] && e_bar=""
-    echo "  ${C_success}  [OK] ${completed_count}/${all_total} done${R}  ${C_success}${f_bar}${C_dim}${e_bar}${R}"
+    echo "  ${C_success}✓ [OK] ${completed_count}/${all_total} done${R}  ${C_success}${f_bar}${C_dim}${e_bar}${R}"
 
     # Footer
     echo ""
