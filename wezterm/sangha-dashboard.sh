@@ -124,7 +124,7 @@ while true; do
         tasks_json=$(curl -s -H "Authorization: Bearer $API_KEY" \
             "https://api.todoist.com/rest/v2/tasks?filter=today%7Coverdue" 2>/dev/null)
 
-        today=$(date -u +"%Y-%m-%dT00:00:00")
+        today=$(TZ="Asia/Tokyo" date +"%Y-%m-%dT00:00:00")
         completed_json=$(curl -s -H "Authorization: Bearer $API_KEY" \
             "https://api.todoist.com/sync/v9/completed/get_all?since=$today" 2>/dev/null)
         completed_count=$(echo "$completed_json" | python3 -c "import sys,json; d=json.load(sys.stdin); print(len(d.get('items',[])))" 2>/dev/null || echo 0)
