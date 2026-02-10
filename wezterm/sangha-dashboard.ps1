@@ -1,5 +1,5 @@
 # ============================================
-#  Sangha Dashboard v1.4
+#  Sangha Dashboard v1.5
 #  WezTerm Pane Dashboard with Todoist + Clock
 #  Windows PowerShell 5.x compatible
 # ============================================
@@ -9,6 +9,9 @@ $API_KEY  = $env:TODOIST_API_KEY
 $INTERVAL = 60
 $TZ       = "Tokyo Standard Time"
 $THM      = "tokyo-night"
+
+# TLS 1.2
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
 # ESC character
 $E = [char]27
@@ -98,12 +101,12 @@ $SEP = "$($C.border)$("$sepChar" * 44)$R"
 # --- API Key Check ---
 if (-not $API_KEY) {
     Write-Host ""
-    Write-Host "  $($C.error)${B}! TODOIST_API_KEY が未設定です$R"
+    Write-Host "  $($C.error)${B}! TODOIST_API_KEY is not set$R"
     Write-Host ""
-    Write-Host "  $($C.fg)PowerShellで以下を実行してください:$R"
+    Write-Host "  $($C.fg)Run in PowerShell:$R"
     Write-Host "  $($C.cyan)[Environment]::SetEnvironmentVariable('TODOIST_API_KEY', 'your-key', 'User')$R"
     Write-Host ""
-    Write-Host "  $($C.dim)設定後、WezTermを再起動$R"
+    Write-Host "  $($C.dim)Then restart WezTerm$R"
     Write-Host ""
     Start-Sleep -Seconds 5
 }
@@ -115,44 +118,51 @@ Write-Host $hideCursor -NoNewline
 
 try {
     while ($true) {
-        # --- Fetch Todoist data ---
-        $tasks = $null
+        $tasks = @()
         $completedCount = 0
 
         if ($API_KEY) {
+            $wc = $null
             try {
                 $wc = New-Object System.Net.WebClient
                 $wc.Encoding = [System.Text.Encoding]::UTF8
                 $wc.Headers.Add("Authorization", "Bearer $API_KEY")
                 $json = $wc.DownloadString("https://api.todoist.com/rest/v2/tasks?filter=today%7Coverdue")
-                $wc.Dispose()
                 $tasks = $json | ConvertFrom-Json
-            } catch {}
+            }
+            catch {
+                $tasks = @()
+            }
+            if ($wc) { $wc.Dispose() }
 
+            $wc2 = $null
             try {
-                $headers = @{ "Authorization" = "Bearer $API_KEY" }
-                # JST基準で今日の00:00を取得
                 $jstNow = [System.TimeZoneInfo]::ConvertTimeBySystemTimeZoneId((Get-Date), $TZ)
                 $today = $jstNow.Date.ToString("yyyy-MM-ddT00:00:00")
-                $uri = "https://api.todoist.com/sync/v9/completed/get_all?since=$today"
-                $resp = Invoke-RestMethod -Uri $uri -Headers $headers -Method Get
-                $completedCount = $resp.items.Count
-            } catch {}
+                $wc2 = New-Object System.Net.WebClient
+                $wc2.Encoding = [System.Text.Encoding]::UTF8
+                $wc2.Headers.Add("Authorization", "Bearer $API_KEY")
+                $json2 = $wc2.DownloadString("https://api.todoist.com/sync/v9/completed/get_all?since=$today")
+                $cResp = $json2 | ConvertFrom-Json
+                if ($cResp.items) {
+                    $completedCount = ($cResp.items | Measure-Object).Count
+                }
+            }
+            catch {
+                $completedCount = 0
+            }
+            if ($wc2) { $wc2.Dispose() }
         }
 
-        $taskCount = 0
-        if ($tasks) { $taskCount = @($tasks).Count }
+        $taskCount = ($tasks | Measure-Object).Count
         $allTotal = $taskCount + $completedCount
 
-        # --- Time ---
         $now = [System.TimeZoneInfo]::ConvertTimeBySystemTimeZoneId((Get-Date), $TZ)
         $timeStr = $now.ToString("HH:mm:ss")
         $dateStr = $now.ToString("yyyy-MM-dd (ddd)")
 
-        # --- Render ---
         Clear-Host
 
-        # Header
         Write-Host ""
         Write-Host "  $($C.accent)${B}  Sangha Dashboard$R"
         Write-Host "  $SEP"
@@ -162,27 +172,25 @@ try {
         Write-Host ""
         Write-Host "  $SEP"
 
-        # Tasks
         Write-Host ""
         Write-Host "  $($C.cyan)${B}  Today's Tasks$R"
         Write-Host ""
 
         if (-not $API_KEY) {
-            Write-Host "  $($C.warning)  API未設定 - 時計のみ表示中$R"
+            Write-Host "  $($C.warning)  API not set$R"
         }
         elseif ($taskCount -eq 0) {
             Write-Host "  $($C.success)  All clear!$R"
         }
         else {
             $idx = 0
-            $sorted = @($tasks) | Sort-Object -Property priority -Descending
+            $sorted = $tasks | Sort-Object -Property priority -Descending
             foreach ($t in $sorted) {
                 if ($idx -ge 12) {
                     $rem = $taskCount - 12
                     Write-Host "  $($C.dim)  ... +$rem more$R"
                     break
                 }
-                # Priority color
                 $pc = $C.dim
                 $pl = "p4"
                 switch ($t.priority) {
@@ -190,7 +198,6 @@ try {
                     3 { $pc = $C.warning; $pl = "p2" }
                     2 { $pc = $C.cyan;    $pl = "p3" }
                 }
-                # Truncate
                 $name = $t.content
                 if ($name.Length -gt 30) { $name = $name.Substring(0, 27) + "..." }
                 $pad = " " * [Math]::Max(0, 30 - $name.Length)
@@ -204,7 +211,6 @@ try {
         Write-Host "  $SEP"
         Write-Host ""
 
-        # Progress bar
         $barW = 20
         $fill = 0
         if ($allTotal -gt 0) { $fill = [Math]::Floor(($completedCount / $allTotal) * $barW) }
@@ -215,13 +221,11 @@ try {
         $eBar = "$ec" * $empty
         Write-Host "  $($C.success)  [OK] $completedCount/$allTotal done$R  $($C.success)$fBar$($C.dim)$eBar$R"
 
-        # Footer
         Write-Host ""
         Write-Host "  $SEP"
         Write-Host "  $($C.dim)  Refresh: ${INTERVAL}s  |  Theme: $THM$R"
         Write-Host "  $($C.dim)  Ctrl+C: exit$R"
 
-        # Wait
         Start-Sleep -Seconds $INTERVAL
     }
 }

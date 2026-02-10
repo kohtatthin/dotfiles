@@ -5,30 +5,39 @@ local config = {}
 -- OS判定
 local is_windows = wezterm.target_triple:find('windows') ~= nil
 
--- 4ペインレイアウトで最大化起動
--- ┌──────────┬─────────────────────┐
--- │  yazi    │    Claude Code      │
--- ├──────────┼─────────────────────┤
--- │ lazygit  │ Sangha Dashboard    │
--- └──────────┴─────────────────────┘
+-- 5ペインレイアウトで最大化起動
+-- 比率 = 左1 : 中5 : 右2
+-- ┌──────┬────────────────────────┬──────────┐
+-- │ yazi │     Claude Code        │          │
+-- │      │   (プロジェクト実行)     │ Claude   │
+-- ├──────┼────────────────────────┤ (壁打ち) │
+-- │lazy  │   Sangha Dashboard     │          │
+-- │ git  │                        │          │
+-- └──────┴────────────────────────┴──────────┘
 wezterm.on('gui-startup', function(cmd)
   local tab, pane, window = mux.spawn_window(cmd or {})
   window:gui_window():maximize()
 
-  -- 左右に分割
-  local right_pane = pane:split {
+  -- 1) 右端ぶち抜き壁打ちペイン (3/10 = 0.3)
+  local chat_pane = pane:split {
+    direction = 'Right',
+    size = 0.3,
+  }
+
+  -- 2) 残りから中央ペインを切り出し (3/4 = 0.75)
+  local middle_pane = pane:split {
     direction = 'Right',
     size = 0.75,
   }
 
-  -- 左側を上下に分割（上:yazi、下:lazygit）
+  -- 3) 左側を上下に分割（上:yazi、下:lazygit）
   local left_bottom = pane:split {
     direction = 'Bottom',
-    size = 0.4,
+    size = 0.25,
   }
 
-  -- 右側を上下に分割（上:Claude Code、下:Sangha Dashboard）
-  local right_bottom = right_pane:split {
+  -- 4) 中央を上下に分割（上:Claude Code、下:Sangha Dashboard）
+  local middle_bottom = middle_pane:split {
     direction = 'Bottom',
     size = 0.4,
   }
@@ -38,12 +47,16 @@ wezterm.on('gui-startup', function(cmd)
 
   if is_windows then
     left_bottom:send_text('cd $HOME\\dotfiles; lazygit\n')
-    right_pane:send_text('claude\n')
-    right_bottom:send_text('& "$HOME\\dotfiles\\wezterm\\sangha-dashboard.ps1"\n')
+    -- 中央: プロジェクトディレクトリでClaude Code（実行者）
+    middle_pane:send_text('claude\n')
+    middle_bottom:send_text('& "$HOME\\dotfiles\\wezterm\\sangha-dashboard.ps1"\n')
+    -- 右: 壁打ち専用ディレクトリでClaude Code
+    chat_pane:send_text('cd $HOME\\claude-chat; claude\n')
   else
     left_bottom:send_text('cd ~/dotfiles && lazygit\n')
-    right_pane:send_text('claude\n')
-    right_bottom:send_text('~/dotfiles/wezterm/sangha-dashboard.sh\n')
+    middle_pane:send_text('claude\n')
+    middle_bottom:send_text('~/dotfiles/wezterm/sangha-dashboard.sh\n')
+    chat_pane:send_text('cd ~/claude-chat && claude\n')
   end
 end)
 
@@ -91,6 +104,11 @@ if is_windows then
 else
   dashboard_cmd = '~/dotfiles/wezterm/sangha-dashboard.sh\r\n'
 end
+
+-- モデル指定解除
+  config.set_environment_variables = {
+    ANTHROPIC_MODEL = '',
+  }
 
 -- キーバインド
 config.keys = {
