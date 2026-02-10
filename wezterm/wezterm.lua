@@ -35,12 +35,14 @@ wezterm.on('gui-startup', function(cmd)
 
   -- 各ペインでコマンド実行
   pane:send_text('yazi\n')
-  left_bottom:send_text('cd ~/dotfiles; lazygit\n')
-  right_pane:send_text('claude\n')
 
   if is_windows then
-    right_bottom:send_text('& ~/dotfiles/wezterm/sangha-dashboard.ps1\n')
+    left_bottom:send_text('cd $HOME\\dotfiles; lazygit\n')
+    right_pane:send_text('claude\n')
+    right_bottom:send_text('& "$HOME\\dotfiles\\wezterm\\sangha-dashboard.ps1"\n')
   else
+    left_bottom:send_text('cd ~/dotfiles && lazygit\n')
+    right_pane:send_text('claude\n')
     right_bottom:send_text('~/dotfiles/wezterm/sangha-dashboard.sh\n')
   end
 end)
@@ -58,7 +60,7 @@ if is_windows then
   config.default_cwd = 'C:/claude'
   config.background = {
     {
-      source = { File = 'C:/Users/sss-0/OneDrive - トリプルエス株式会社/画像/壁紙/wallhaven-xlpv8v.jpg' },
+      source = { File = wezterm.home_dir .. '/dotfiles/wezterm/wallpaper_win.jpg' },
       hsb = { brightness = 0.1 },
       opacity = 0.9,
       horizontal_align = 'Center',
@@ -85,7 +87,7 @@ end
 -- ダッシュボード起動コマンド
 local dashboard_cmd
 if is_windows then
-  dashboard_cmd = '& ~/dotfiles/wezterm/sangha-dashboard.ps1\r\n'
+  dashboard_cmd = '& "$HOME\\dotfiles\\wezterm\\sangha-dashboard.ps1"\r\n'
 else
   dashboard_cmd = '~/dotfiles/wezterm/sangha-dashboard.sh\r\n'
 end
