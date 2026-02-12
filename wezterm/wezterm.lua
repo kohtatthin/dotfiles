@@ -11,6 +11,7 @@ local launcher_apps
 if is_windows then
   launcher_apps = {
     { id = 'claude',     label = 'Claude Code',       cmd = 'claudecode' },
+    { id = 'claude-work', label = 'Claude Code (会社)', cmd = '$env:CLAUDE_CONFIG_DIR = "$HOME\\.claude-work"; claudecode' },
     { id = 'gemini',     label = 'Gemini CLI',        cmd = 'cd C:\\claude; gemini' },
     { id = 'lazygit',    label = 'lazygit',           cmd = 'cd $HOME\\dotfiles; lazygit' },
     { id = 'dashboard',  label = 'Sangha Dashboard',  cmd = '& "$HOME\\dotfiles\\wezterm\\sangha-dashboard.ps1"' },
@@ -20,6 +21,7 @@ if is_windows then
 else
   launcher_apps = {
     { id = 'claude',     label = 'Claude Code',       cmd = 'claude' },
+    { id = 'claude-work', label = 'Claude Code (会社)', cmd = 'CLAUDE_CONFIG_DIR=~/.claude-work claude' },
     { id = 'gemini',     label = 'Gemini CLI',        cmd = 'cd ~/claude && gemini' },
     { id = 'lazygit',    label = 'lazygit',           cmd = 'cd ~/dotfiles && lazygit' },
     { id = 'dashboard',  label = 'Sangha Dashboard',  cmd = '~/dotfiles/wezterm/sangha-dashboard.sh' },
