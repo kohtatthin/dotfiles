@@ -56,10 +56,8 @@ WezTerm 起動時に6ペインが自動展開される。
 | lazygit | `cd ~/dotfiles && lazygit` |
 | Obsidian Tasks | `python3 ~/claude/tools/task.py watch`（Win は `python`） |
 | Codex CLI | `cd ~/claude && codex` |
-| Sakana Fugu（Windows） | `cd C:\claude; codex-fugu` |
-| Sakana Fugu Ultra（Windows） | `cd C:\claude; codex-fugu -m fugu-ultra` |
-| Sakana Fugu 直接API（Windows） | `cd C:\claude; fugu-direct`（Codexを介さずChat Completions APIを直叩き） |
-| Sakana Fugu Ultra 直接API（Windows） | `cd C:\claude; fugu-direct -Model fugu-ultra` |
+| Sakana Fugu（Windows） | `cd C:\claude; codex --profile sakana-fugu` |
+| Sakana Fugu Ultra（Windows） | `cd C:\claude; codex --profile sakana-fugu-ultra` |
 | yazi | `yazi` |
 | Shell | 何もしない（シェルに戻る） |
 
