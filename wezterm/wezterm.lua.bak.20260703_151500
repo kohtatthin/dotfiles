@@ -26,8 +26,7 @@ if is_windows then
     { id = 'gemini',     label = 'Gemini CLI',        cmd = 'cd C:\\claude; gemini' },
     { id = 'lazygit',    label = 'lazygit',           cmd = 'cd $HOME\\dotfiles; lazygit' },
     { id = 'dashboard',  label = 'Todoist',            cmd = '& $HOME\\dotfiles\\wezterm\\todoist.ps1' },
-    { id = 'codex',      label = 'Codex CLI (会社)',    cmd = 'cd C:\\claude; codex' },
-    { id = 'codex-personal', label = 'Codex CLI (個人)', cmd = '$env:CODEX_HOME = "$HOME\\.codex-personal"; codex' },
+    { id = 'codex',      label = 'Codex CLI',          cmd = 'cd C:\\claude; codex' },
     { id = 'fugu',       label = '🐟 Sakana Fugu',      cmd = 'cd C:\\claude; codex-fugu' },
     { id = 'fugu-ultra', label = '🐡 Sakana Fugu Ultra', cmd = 'cd C:\\claude; codex-fugu -m fugu-ultra' },
     { id = 'fugu-direct',       label = '🐟 Sakana Fugu（直接API）',       cmd = 'cd C:\\claude; fugu-direct' },
@@ -155,7 +154,7 @@ wezterm.on('gui-startup', function(cmd)
       middle_pane:send_text('cd C:\\claude; $env:CLAUDE_CONFIG_DIR = "$HOME\\.claude"; claude\n')
       -- ④ 中下: Grok Build（xAI 実行ワーカー）。cwd=C:\claude で AGENTS.md/MCP を継承。grok は ~/.grok/bin（User PATH 済）。
       middle_bottom:send_text('cd C:\\claude; grok\n')
-      -- ② 右上: レビュー専用（Codex・会社アカウント=既定 ~/.codex。個人は F9 ランチャー or CODEX_HOME=~/.codex-personal）
+      -- ② 右上: レビュー専用（Codex）
       right_pane:send_text('cd C:\\claude; codex\n')
       -- ③ 右下: 実行ワーカー（個人Claude）
       right_bottom:send_text('cd C:\\tamura; $env:CLAUDE_CONFIG_DIR = "$HOME\\.claude-personal"; claude\n')

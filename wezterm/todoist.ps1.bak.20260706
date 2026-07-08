@@ -435,7 +435,6 @@ function Update-TodoistData {
     $script:CompletedCount = 0
     if (-not $API_KEY) { return }
 
-    Sync-ApiCompletionsToLog
     Update-ProjectMap
 
     try {
@@ -609,72 +608,6 @@ function Get-LocalCompletedTaskIdsToday {
     } catch {
         return $result
     }
-}
-
-function Get-LoggedCompleteTaskIds {
-    # actions.jsonl に既に "complete" として記録済みの taskId 集合。
-    # 二重書き込み防止用（日付を問わず全期間でチェックする）。
-    $ids = @{}
-    if (-not (Test-Path -LiteralPath $LOG_PATH)) { return $ids }
-    try {
-        $lines = @(Get-Content -LiteralPath $LOG_PATH -Encoding UTF8)
-        foreach ($line in $lines) {
-            if (-not $line -or -not $line.Trim()) { continue }
-            try { $entry = $line | ConvertFrom-Json } catch { continue }
-            if ([string]$entry.action -ne "complete") { continue }
-            $tid = [string]$entry.taskId
-            if ($tid) { $ids[$tid] = $true }
-        }
-    } catch { }
-    return $ids
-}
-
-function Sync-ApiCompletionsToLog {
-    # actions.jsonl はこれまでダッシュボード内 [c]omplete 操作でしか記録されず、
-    # スマホ/Web版など他経路での完了が抜け落ちていた。
-    # Todoist の /activities（完了元を問わない）を突き合わせ、未記録分だけ追記する。
-    if (-not $API_KEY) { return }
-    try {
-        $tzInfo   = [System.TimeZoneInfo]::FindSystemTimeZoneById($TZ)
-        $todayJst = [System.TimeZoneInfo]::ConvertTimeBySystemTimeZoneId((Get-Date), $TZ).Date
-        $logged   = Get-LoggedCompleteTaskIds
-        $cursor = $null
-        $pages  = 0
-        $done   = $false
-        while (-not $done) {
-            $path = "/activities?event_type=completed&limit=100"
-            if ($cursor) { $path += "&cursor=" + [Uri]::EscapeDataString($cursor) }
-            $resp = Invoke-Todoist -Method Get -Path $path
-            $events = New-TaskList
-            Add-ResponseItems -Target $events -Response $resp -PropertyName "results"
-            if ($events.Count -eq 0) { break }
-
-            $oldestJst = $todayJst
-            foreach ($e in $events) {
-                if (-not $e -or -not $e.event_date) { continue }
-                $utc = [DateTimeOffset]::Parse([string]$e.event_date).UtcDateTime
-                $jst = [System.TimeZoneInfo]::ConvertTimeFromUtc($utc, $tzInfo)
-                if ($jst.Date -eq $todayJst) {
-                    $oid = [string]$e.object_id
-                    if ($oid -and -not $logged.ContainsKey($oid)) {
-                        $content = ""
-                        if ($e.PSObject.Properties["extra_data"] -and $e.extra_data) { $content = [string]$e.extra_data.content }
-                        $task = [pscustomobject]@{ id = $oid; content = $content; priority = $null; dueDate = $null }
-                        Write-ActionLog -Action "complete" -Task $task -Detail "synced_from_api"
-                        $logged[$oid] = $true
-                    }
-                }
-                if ($jst.Date -lt $oldestJst) { $oldestJst = $jst.Date }
-            }
-
-            $cursor = $null
-            if ($resp.PSObject.Properties["next_cursor"]) { $cursor = [string]$resp.next_cursor }
-            $pages++
-            if ($oldestJst -lt $todayJst) { $done = $true }
-            elseif (-not $cursor) { $done = $true }
-            elseif ($pages -ge 5) { $done = $true }
-        }
-    } catch { }
 }
 
 # --- Rendering --------------------------------------------------
