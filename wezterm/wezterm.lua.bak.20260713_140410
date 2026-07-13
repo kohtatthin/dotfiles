@@ -328,14 +328,8 @@ local function read_wallpaper_state()
   if not f then return nil end
   local line = f:read('*l')
   f:close()
-  if not line or line == '' then return nil end
-  if line ~= '_none' then
-    -- 保存された壁紙ファイルが削除済みならデフォルトにフォールバック
-    local img = io.open(line, 'r')
-    if not img then return nil end
-    img:close()
-  end
-  return line
+  if line and line ~= '' then return line end
+  return nil
 end
 
 local function write_wallpaper_state(path)
@@ -390,9 +384,9 @@ else
 end
 
 -- モデル指定解除
-config.set_environment_variables = {
-  ANTHROPIC_MODEL = '',
-}
+  config.set_environment_variables = {
+    ANTHROPIC_MODEL = '',
+  }
 
 -- ===== プロファイル =====
 -- テーマ + 壁紙 + 明るさをセットで切り替え
@@ -558,6 +552,22 @@ local brightness_choices = {
   { id = '_reset', label = 'Reset to default' },
 }
 
+-- wallpapers/ フォルダ内の画像リスト（設定リロード時にスキャン）
+local wallpaper_choices = {
+  { id = '_none', label = 'No wallpaper' },
+  { id = '_reset', label = 'Reset to default' },
+}
+do
+  local ok, _ = pcall(function()
+    for _, ext in ipairs({ '*.jpg', '*.jpeg', '*.png', '*.gif', '*.webp' }) do
+      for _, path in ipairs(wezterm.glob(wallpaper_dir .. ext)) do
+        local name = path:match('[/\\]([^/\\]+)$') or path
+        table.insert(wallpaper_choices, 1, { id = path, label = name })
+      end
+    end
+  end)
+end
+
 -- キーバインド
 config.keys = {
   -- Alt+Enter をターミナルに渡す（Claude Codeの改行用）
@@ -569,11 +579,6 @@ config.keys = {
   { key = 'k', mods = 'CTRL', action = act.ActivatePaneDirection 'Up' },
   { key = 'j', mods = 'CTRL', action = act.ActivatePaneDirection 'Down' },
   { key = 'w', mods = 'CTRL|SHIFT', action = act.CloseCurrentPane { confirm = true } },
-  -- Pane zoom: 現在ペインを一時最大化⇔もう一度で復帰 (Ctrl+Shift+Z)
-  { key = 'z', mods = 'CTRL|SHIFT', action = act.TogglePaneZoomState },
-  -- Pane select: 番号オーバーレイでペインへジャンプ (F8)
-  -- ※表示される番号は分割順の pane index。公式呼称①〜⑦とは一致しない。
-  { key = 'F8', mods = 'NONE', action = act.PaneSelect { alphabet = '1234567890', mode = 'Activate' } },
   -- Quick launch: lazygit (Ctrl+Shift+G)
   { key = 'g', mods = 'CTRL|SHIFT', action = act.SendString('cd ~/dotfiles; lazygit\r\n') },
   -- Quick launch: Sangha Dashboard (Ctrl+Shift+S)
@@ -744,41 +749,22 @@ config.keys = {
 
 -- ===== AI トークン残量ステータスライン =====
 -- 右側に Claude(個/社) のプラン枠使用率（ccusage 近似）と
--- Codex(5h/週) の使用率を表示する。
--- ai_usage.ps1 が $TEMP\wez_ai_status.txt（1行目=UNIX秒, 2行目=本文）を書き、
--- ここではそれを読むだけ（同期 run_child_process はUIが固まるため廃止。2026-07-13）。
--- 鮮度は通常 ⑤ペインの ai_usage_pane.ps1（30秒周期）が保つ。古いときだけ
--- background_child_process で ai_usage.ps1 を非同期起動して次回に備える。
+-- Codex(5h/週) の使用率を表示する。重い ccusage 算出は ai_usage.ps1 が
+-- バックグラウンドに逃がすので、ここでは結果を間引いて取得するだけ。
 if is_windows then
   local ai_status = ''
-  local ai_read_last = 0
-  local ai_spawn_last = 0
-  local AI_READ_INTERVAL = 10   -- ファイル読み取りの間引き（秒）
-  local AI_STALE = 120          -- これより古ければ refresh を非同期起動（秒）
-  local temp_dir = os.getenv('TEMP')
-  local ai_status_path = temp_dir and (temp_dir .. '\\wez_ai_status.txt') or nil
+  local ai_last = 0
+  local AI_INTERVAL = 30  -- 取得間隔（秒）
   wezterm.on('update-status', function(window, pane)
-    if not ai_status_path then return end
     local now = os.time()
-    if (now - ai_read_last) >= AI_READ_INTERVAL then
-      ai_read_last = now
-      local ts = nil
-      local f = io.open(ai_status_path, 'r')
-      if f then
-        ts = tonumber(f:read('*l') or '')
-        local line = f:read('*l')
-        f:close()
-        if line and line ~= '' then
-          ai_status = line
-        end
-      end
-      -- 古い/無いときだけ非同期で更新起動（多重起動は60秒間隔で抑止）
-      if (not ts or (now - ts) > AI_STALE) and (now - ai_spawn_last) >= 60 then
-        ai_spawn_last = now
-        wezterm.background_child_process({
-          'powershell.exe', '-NoProfile', '-ExecutionPolicy', 'Bypass',
-          '-File', wezterm.home_dir .. '\\dotfiles\\wezterm\\ai_usage.ps1',
-        })
+    if ai_status == '' or (now - ai_last) >= AI_INTERVAL then
+      ai_last = now
+      local ok, stdout = wezterm.run_child_process({
+        'powershell.exe', '-NoProfile', '-ExecutionPolicy', 'Bypass',
+        '-File', wezterm.home_dir .. '\\dotfiles\\wezterm\\ai_usage.ps1',
+      })
+      if ok and stdout then
+        ai_status = stdout:gsub('%s+$', '')
       end
     end
     if ai_status ~= '' then

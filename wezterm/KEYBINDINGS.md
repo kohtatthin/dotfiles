@@ -1,32 +1,56 @@
 # WezTerm キーバインド & 機能ガイド
 
-設定ファイル: `~/dotfiles/wezterm/wezterm.lua`
+設定ファイル: `~/dotfiles/wezterm/wezterm.lua`（最終更新: 2026-07-13）
 
 ---
 
-## 起動時レイアウト
+## 起動時レイアウト（7ペイン）
 
-WezTerm 起動時に6ペインが自動展開される。
+WezTerm 起動時に7ペインが自動展開される。比率 = 左2 : 中4 : 右4、上下等分（左カラムのみ3分割）。
+
+**ペイン番号呼称（公式。会話・指示はこの番号で統一）**
 
 ```
-┌──────┬────────────────────────┬──────────┐
-│ yazi │     Claude Code        │ Codex    │
-│      │                        │  CLI     │
-├──────┼────────────────────────┼──────────┤
-│lazy  │   Obsidian Tasks       │ Gemini   │
-│ git  │   (task.py watch)      │  CLI     │
-└──────┴────────────────────────┴──────────┘
-  比率 1 : 5 : 2（左上下/中央上下/右上下）
+⑦
+⑥　①　②
+⑤　④　③
+```
+
+### Windows
+
+```
+┌──────────┬────────────────────┬──────────────────┐
+│⑦Todoist  │① 司令／壁打ち(会社) │② Codex (レビュー) │
+├──────────┤                    │                  │
+│⑥カレンダー│────────────────────│──────────────────│
+├──────────┤④ Grok Build (xAI)  │③ 実行ワーカー(個人)│
+│⑤AI使用量 │                    │                  │
+└──────────┴────────────────────┴──────────────────┘
 ```
 
 | ペイン | 内容 |
 |--------|------|
-| 左上 | yazi（ファイラー） |
-| 左下 | lazygit (`~/dotfiles`) |
-| 中央上 | Claude Code |
-| 中央下 | Obsidian Tasks ダッシュボード (`task.py watch`) |
-| 右上 | Codex CLI |
-| 右下 | Gemini CLI |
+| ⑦ | Todoist (`todoist.ps1`) |
+| ⑥ | カレンダー (`calendar.ps1`) |
+| ⑤ | AI使用量ライブ (`ai_usage_pane.ps1`、30秒周期) |
+| ① | 司令／壁打ち（会社Claude、`C:\claude`） |
+| ④ | Grok Build（xAI 実行ワーカー） |
+| ② | Codex レビュー（会社アカウント） |
+| ③ | 実行ワーカー（個人Claude、`C:\tamura`） |
+
+### Mac
+
+| ペイン | 内容 |
+|--------|------|
+| ⑦ | Todoist (`todoist.sh`) |
+| ⑥ | カレンダー (`cal`) |
+| ⑤ | lazygit (`~/dotfiles`) |
+| ① | 個人Claude 司令／壁打ち |
+| ④ | Grok Build（実装ワーカー） |
+| ② | Codex レビュー |
+| ③ | Shell（テスト・ログ・開発サーバー用） |
+
+※ yazi / lazygit(Win) / Gemini は常駐から外し、F9 ランチャーで随時起動。
 
 ---
 
@@ -39,27 +63,39 @@ WezTerm 起動時に6ペインが自動展開される。
 | `Ctrl+Shift+W` | 現在のペインを閉じる（確認あり） |
 | `Ctrl+H` / `Ctrl+L` | 左／右のペインへ移動 |
 | `Ctrl+K` / `Ctrl+J` | 上／下のペインへ移動 |
+| `Ctrl+Shift+Z` | ペインのズーム切替（一時最大化⇔復帰） |
+| `F8` | ペイン選択（番号オーバーレイでジャンプ） |
+
+※ `F8` で表示される番号は分割順の pane index。公式呼称①〜⑦とは一致しない。
 
 ---
 
 ## ランチャーメニュー
 
-**`F9`** でアプリ選択メニューが開く。現在のペインで動いているプロセスを停止し、選んだアプリに切り替える。
+**`F9`** でアプリ選択メニューが開く。現在のペインのプロセスを停止（Ctrl+C×2）し、選んだアプリに切り替える。
+※ Ctrl+C で終了しない TUI（yazi / lazygit 等は `q` で終了）では手動で終了してから選ぶ。
+
+### Windows
 
 | 選択肢 | 起動コマンド |
 |--------|-------------|
-| Claude Code | `claude`（個人アカウント） |
-| Claude Code (会社) | `CLAUDE_CONFIG_DIR=~/.claude-work claude --model opus` |
-| Claude Code (Clean) | `CLAUDE_CONFIG_DIR=~/.claude-clean claude --model opus --tools default --disable-slash-commands --strict-mcp-config --setting-sources user` |
-| Claude Code (会社 Clean) | `CLAUDE_CONFIG_DIR=~/.claude-work-clean claude --model opus --tools default --disable-slash-commands --strict-mcp-config --setting-sources user` |
-| Gemini CLI | `cd ~/claude && gemini` |
-| lazygit | `cd ~/dotfiles && lazygit` |
-| Obsidian Tasks | `python3 ~/claude/tools/task.py watch`（Win は `python`） |
-| Codex CLI | `cd ~/claude && codex` |
-| Sakana Fugu（Windows） | `cd C:\claude; codex --profile sakana-fugu` |
-| Sakana Fugu Ultra（Windows） | `cd C:\claude; codex --profile sakana-fugu-ultra` |
+| Claude Code | `CLAUDE_CONFIG_DIR=~/.claude-personal claude`（個人） |
+| Claude Code (会社) | `CLAUDE_CONFIG_DIR=~/.claude claude` |
+| Claude Code (Clean) | `CLAUDE_CONFIG_DIR=~/.claude-clean claude --model opus --tools default ...` |
+| Claude Code (会社 Clean) | `CLAUDE_CONFIG_DIR=~/.claude-work-clean claude --model opus --tools default ...` |
+| Gemini CLI | `cd C:\claude; gemini` |
+| lazygit | `cd ~/dotfiles; lazygit` |
+| Todoist | `todoist.ps1` |
+| 📅 カレンダー | `calendar.ps1` |
+| Codex CLI (会社) | `cd C:\claude; codex` |
+| Codex CLI (個人) | `CODEX_HOME=~/.codex-personal codex` |
+| 🐟 Sakana Fugu | `doppler run --project sakana-ai --config prd -- codex-fugu` |
+| 🐡 Sakana Fugu Ultra | `doppler run --project sakana-ai --config prd -- codex-fugu-ultra` |
+| Grok Build | `cd C:\claude; grok` |
 | yazi | `yazi` |
-| Shell | 何もしない（シェルに戻る） |
+| PowerShell | 何もしない（シェルに戻る） |
+
+Mac は Claude 系の CONFIG_DIR 割当と Todoist スクリプトが異なる（Fugu / カレンダー / Codex個人 は Windows のみ）。
 
 ---
 
@@ -68,27 +104,27 @@ WezTerm 起動時に6ペインが自動展開される。
 | キー | 機能 |
 |------|------|
 | `Ctrl+Shift+G` | lazygit を起動 |
-| `Ctrl+Shift+S` | Obsidian Tasks ダッシュボードを起動 |
+| `Ctrl+Shift+S` | Todoist を起動 |
 | `Alt+Enter` | Claude Code の改行用（ターミナルに渡す） |
 
 ---
 
 ## 外観の一時変更
 
-すべてセッション限り。`wezterm.lua` は書き換わらず、再起動で元に戻る。各メニューの「Reset to default」で即座にデフォルトに復帰できる。
+`wezterm.lua` は書き換わらず、各メニューの「Reset to default」で即座にデフォルトへ復帰できる。壁紙切替のみ Mac では状態ファイルに保存され次回起動時も復元される（それ以外はセッション限り）。
 
 | メニュー | Windows | macOS |
 |----------|---------|-------|
 | カラースキーム切替 | `Ctrl+Shift+F1` | `Cmd+Shift+T` |
 | 壁紙の明るさ | `Ctrl+Shift+F2` | `Cmd+Shift+B` |
-| 壁紙画像の切替 | `Ctrl+Shift+F3` | `Cmd+Shift+I` |
+| 壁紙画像の切替 | `Ctrl+Shift+F3`（セッション限り） | `Cmd+Shift+I`（永続化） |
 | プロファイル切替（テーマ+壁紙セット） | `Ctrl+Shift+F4` | `Cmd+Shift+P` |
 
 macOS が F1〜F4 を OS 側で奪うため、Mac は Cmd 系に分岐させている。
 
 ### カラースキーム
 
-Dark / SF・Cyberpunk / Light あわせて 27 種類を切替可能（Tokyo Night, Catppuccin, Dracula, Gruvbox, Nord, SF Terminal, Neuromancer, Claude Light など）。選択した現在値は `(current)` 表示。
+Dark / SF・Cyberpunk / Light あわせて約30種類を切替可能（Tokyo Night, Catppuccin, Dracula, Gruvbox, Nord, SF Terminal, Neuromancer, Holo HUD, Claude Light など）。現在値は `(current)` 表示。ライトテーマ選択時は壁紙を白飛ばし＋背景不透明度を自動調整。
 
 ### プロファイル
 
@@ -96,27 +132,30 @@ Dark / SF・Cyberpunk / Light あわせて 27 種類を切替可能（Tokyo Nigh
 
 | ID | 内容 |
 |----|------|
-| personal | Tokyo Night + デフォルト壁紙 |
-| work | Claude Light、壁紙なし |
-| work-dark | Catppuccin Mocha + 海の壁紙 |
-| sf-terminal | SF Terminal、半透過でデスクトップが透ける |
-| neuromancer | Neuromancer + サイバーパンク壁紙 |
+| personal | 🏠 Tokyo Night + デフォルト壁紙 |
+| work | 🏢 Claude Light、壁紙なし・完全不透明 |
+| work-dark | 🏢 Catppuccin Mocha + 海の壁紙 |
+| sf-terminal | 🛸 SF Terminal、半透過でデスクトップが透ける |
+| neuromancer | 💀 Neuromancer + サイバーパンク壁紙 |
+| holo-hud | 🛰 Holo HUD、半透過（HUDが宙に浮く感じ） |
 
 ### 壁紙画像
 
-`~/dotfiles/wezterm/wallpapers/` 配下の `jpg/jpeg/png/gif/webp` が自動でリストアップされる。ファイルを置くだけで反映（再起動不要）。
+Windows: `~/dotfiles/wezterm/wallpapers/`、Mac: `~/dotfiles/wezterm/wallpapers/mac/` 配下の `jpg/jpeg/png/gif/webp` をメニューを開くたびにスキャン。ファイルを置くだけで反映（再起動不要）。
 
 ### 壁紙の明るさ
 
-| 選択肢 | 値 |
-|--------|-----|
-| Very Dark | 0.03 |
-| Dark | 0.07 |
-| Default | 0.1 |
-| Medium Dark | 0.15 |
-| Medium | 0.2 |
-| Bright | 0.3 |
-| No wallpaper | 壁紙を非表示にする |
+Very Dark (0.03) 〜 Bright (0.3) の6段階 ＋ No wallpaper。
+
+---
+
+## ステータスライン（AI使用量、Windowsのみ）
+
+右下に Claude（個人/会社のプラン枠使用率、ccusage 近似）と Codex（5h/週）の使用率を表示。
+
+- 表示例: `C 個71% 社-   Cdx 5h50% wk8%`
+- 仕組み: `ai_usage.ps1` が `$TEMP\wez_ai_status.txt` に書き出し、WezTerm はそれを読むだけ（UIをブロックしない）。鮮度は⑤ペインの `ai_usage_pane.ps1`（30秒周期）が保ち、古いときのみバックグラウンドで更新を起動。
+- Claude 側の重い算出は `ai_usage_refresh.ps1`（ccusage）が detached で実行し `$TEMP\wez_ai_usage.json` にキャッシュ。
 
 ---
 
@@ -129,4 +168,5 @@ Dark / SF・Cyberpunk / Light あわせて 27 種類を切替可能（Tokyo Nigh
 | デフォルトシェル | PowerShell (Windows) |
 | 作業ディレクトリ | `C:/claude` (Windows) / `~/claude` (Mac/Linux) |
 | 壁紙の明るさ | 0.1 |
+| 文字背景の不透明度 | 0.3（TUIの塗りつぶし越しに壁紙を透かすため。副作用: 色付き背景全般が薄くなる） |
 | 設定の自動リロード | 有効 |

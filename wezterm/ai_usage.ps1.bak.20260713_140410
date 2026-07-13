@@ -80,14 +80,4 @@ try {
 
 # ---- 合成 ----
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
-$line = ("{0}   {1}" -f $claudeStr, $codexStr)
-Write-Output $line
-
-# WezTerm ステータスライン用にファイルへも書き出す（1行目=UNIX秒, 2行目=本文）。
-# wezterm.lua の update-status はこのファイルを読むだけ（同期 powershell 起動を廃止）。
-try {
-    $statusPath = Join-Path $env:TEMP 'wez_ai_status.txt'
-    $now  = [int][DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
-    $utf8 = New-Object System.Text.UTF8Encoding($false)
-    [System.IO.File]::WriteAllText($statusPath, ("{0}`n{1}" -f $now, $line), $utf8)
-} catch { }
+Write-Output ("{0}   {1}" -f $claudeStr, $codexStr)
