@@ -390,21 +390,9 @@ else
 end
 
 -- モデル指定解除
-local env_vars = {
+config.set_environment_variables = {
   ANTHROPIC_MODEL = '',
 }
-if is_windows then
-  -- Codex は standalone 実体 (~\.codex\packages\standalone\current\bin) から起動しないと
-  -- 補助EXE (codex-resources\codex-windows-sandbox-setup.exe) を絶対パスで解決できない。
-  -- ユーザーPATH先頭にも同エントリを追加済み (2026-07-13) だが、WezTerm が起動時の
-  -- 古いPATHを保持したまま新ペインを開くケースに備えて設定側でも先頭に付ける。
-  local codex_bin = (os.getenv('USERPROFILE') or '') .. '\\.codex\\packages\\standalone\\current\\bin'
-  local cur_path = os.getenv('PATH') or ''
-  if not cur_path:find(codex_bin, 1, true) then
-    env_vars.PATH = codex_bin .. ';' .. cur_path
-  end
-end
-config.set_environment_variables = env_vars
 
 -- ===== プロファイル =====
 -- テーマ + 壁紙 + 明るさをセットで切り替え

@@ -10,21 +10,6 @@ param(
 )
 
 $API_KEY  = $env:TODOIST_API_KEY
-if (-not $API_KEY) {
-    # 環境変数がなければ Doppler (todoist/prd) の TODOIST_API_TOKEN を使う。
-    # 環境変数 TODOIST_API_KEY が設定されていればそちらを優先する。
-    $dopplerCmd = Get-Command doppler -ErrorAction SilentlyContinue
-    if ($dopplerCmd) {
-        try {
-            $dopplerToken = & doppler secrets get TODOIST_API_TOKEN --project todoist --config prd --plain
-            if ($dopplerToken) {
-                $API_KEY = ([string]($dopplerToken | Select-Object -First 1)).Trim()
-            }
-        } catch {
-            $API_KEY = $null
-        }
-    }
-}
 $INTERVAL = 60
 $TZ       = "Tokyo Standard Time"
 $THM      = "tokyo-night"
@@ -131,12 +116,12 @@ $showCursor = "$E[?25h"
 
 if (-not $API_KEY) {
     Write-Host ""
-    Write-Host "  $($C.error)${B}! Todoist API key not available$R"
+    Write-Host "  $($C.error)${B}! TODOIST_API_KEY is not set$R"
     Write-Host ""
-    Write-Host "  $($C.fg)Expected: Doppler todoist/prd TODOIST_API_TOKEN$R"
-    Write-Host "  $($C.cyan)doppler secrets get TODOIST_API_TOKEN --project todoist --config prd --plain$R"
+    Write-Host "  $($C.fg)Run in PowerShell:$R"
+    Write-Host "  $($C.cyan)[Environment]::SetEnvironmentVariable('TODOIST_API_KEY', 'your-key', 'User')$R"
     Write-Host ""
-    Write-Host "  $($C.dim)Or set env var TODOIST_API_KEY and restart WezTerm$R"
+    Write-Host "  $($C.dim)Then restart WezTerm$R"
     Write-Host ""
     Start-Sleep -Seconds 5
 }
