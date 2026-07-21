@@ -27,8 +27,7 @@ if is_windows then
     { id = 'lazygit',    label = 'lazygit',           cmd = 'cd $HOME\\dotfiles; lazygit' },
     { id = 'dashboard',  label = 'Todoist',            cmd = '& $HOME\\dotfiles\\wezterm\\todoist.ps1' },
     { id = 'calendar',   label = '📅 カレンダー',        cmd = '& $HOME\\dotfiles\\wezterm\\calendar.ps1' },
-    -- 会社Codexは CODEX_HOME を明示除去（同一ペインで個人/Fugu起動後の残留対策。ランチャーは send_text 方式でシェルを引き継ぐため）
-    { id = 'codex',      label = 'Codex CLI (会社)',    cmd = 'Remove-Item Env:CODEX_HOME -ErrorAction SilentlyContinue; cd C:\\claude; codex' },
+    { id = 'codex',      label = 'Codex CLI (会社)',    cmd = 'cd C:\\claude; codex' },
     { id = 'codex-personal', label = 'Codex CLI (個人)', cmd = '$env:CODEX_HOME = "$HOME\\.codex-personal"; codex' },
     { id = 'fugu',       label = '🐟 Sakana Fugu',      cmd = '$env:CODEX_HOME = "$HOME\\.codex-personal"; cd C:\\claude; doppler run --project sakana-ai --config prd -- codex-fugu' },
     { id = 'fugu-ultra', label = '🐡 Sakana Fugu Ultra', cmd = '$env:CODEX_HOME = "$HOME\\.codex-personal"; cd C:\\claude; doppler run --project sakana-ai --config prd -- codex-fugu-ultra' },
