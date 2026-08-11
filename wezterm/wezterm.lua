@@ -15,24 +15,68 @@ local config = {}
 -- OS判定
 local is_windows = wezterm.target_triple:find('windows') ~= nil
 
+-- ローカルLLM(LM Studio)の起動コマンド生成。lms は %USERPROFILE%\.lmstudio\bin にあり、
+-- PATHが古いセッションでも動くよう明示追加する。model は `lms ls --json` の modelKey。
+local function lms_chat(model)
+  return '$env:PATH = "$HOME\\.lmstudio\\bin;$env:PATH"; lms chat ' .. model
+end
+
+-- ローカルLLMをエージェントとして使う（opencode + LM Studio のOpenAI互換サーバー）。
+-- lms chat はファイル読み書きツールを持たないので、ファイルを触らせたいときはこちらを使う。
+-- プロバイダ定義は ~/.config/opencode/opencode.json の provider.lmstudio 側にある。
+-- ★ ここにモデルを追加したら opencode.json の provider.lmstudio.models にも同じ modelKey を
+--    必ず登録する。未登録のまま --model で渡すと、警告なく既定モデル（"model" キーの
+--    Nemotron）にフォールバックし、ランチャーがロードした側と食い違って無反応になる（2026-08-05 遭遇）。
+-- コンテキスト長はJITロードだと 8192 に落ちて opencode のシステムプロンプトが溢れるため、
+-- 毎回 unload → 明示ロードでコンテキストを確保する（9B級のロードで10秒前後）。
+local function lms_agent(model, ctx)
+  return '$env:PATH = "$HOME\\.lmstudio\\bin;$env:PATH"; lms server start; lms unload --all; '
+    .. 'lms load ' .. model .. ' --context-length ' .. (ctx or 32768) .. ' --yes; '
+    .. 'cd C:\\claude; opencode --model lmstudio/' .. model
+end
+
 -- ランチャーメニュー: アプリ定義
 local launcher_apps
 if is_windows then
   launcher_apps = {
-    { id = 'claude',     label = 'Claude Code',       cmd = '$env:CLAUDE_CONFIG_DIR = "$HOME\\.claude-personal"; claude' },
-    { id = 'claude-work', label = 'Claude Code (会社)', cmd = '$env:CLAUDE_CONFIG_DIR = "$HOME\\.claude"; claude' },
-    { id = 'claude-clean', label = 'Claude Code (Clean)', cmd = '$env:CLAUDE_CONFIG_DIR = "$HOME\\.claude-clean"; claude --model opus --tools default --disable-slash-commands --strict-mcp-config --setting-sources user' },
-    { id = 'claude-work-clean', label = 'Claude Code (会社 Clean)', cmd = '$env:CLAUDE_CONFIG_DIR = "$HOME\\.claude-work-clean"; claude --model opus --tools default --disable-slash-commands --strict-mcp-config --setting-sources user' },
+    -- Claude系はアカウント(CLAUDE_CONFIG_DIR)と作業ディレクトリを必ずセットで指定する。
+    -- 個人=.claude-personal↔C:\claude / 会社=.claude↔C:\claude（2026-07-30: 個人の作業ディレクトリを C:\tamura から C:\claude へ変更）。
+    { id = 'claude',     label = 'Claude Code',       cmd = 'cd C:\\claude; $env:CLAUDE_CONFIG_DIR = "$HOME\\.claude-personal"; claude' },
+    { id = 'claude-work', label = 'Claude Code (会社)', cmd = 'cd C:\\claude; $env:CLAUDE_CONFIG_DIR = "$HOME\\.claude"; claude' },
+    { id = 'claude-clean', label = 'Claude Code (Clean)', cmd = 'cd C:\\claude; $env:CLAUDE_CONFIG_DIR = "$HOME\\.claude-clean"; claude --model opus --tools default --disable-slash-commands --strict-mcp-config --setting-sources user' },
+    { id = 'claude-work-clean', label = 'Claude Code (会社 Clean)', cmd = 'cd C:\\claude; $env:CLAUDE_CONFIG_DIR = "$HOME\\.claude-work-clean"; claude --model opus --tools default --disable-slash-commands --strict-mcp-config --setting-sources user' },
     { id = 'gemini',     label = 'Gemini CLI',        cmd = 'cd C:\\claude; gemini' },
+    -- Antigravity CLI は agy コマンド（%LOCALAPPDATA%\agy\bin）。PATHが古いセッションでも動くよう明示追加
+    { id = 'antigravity', label = 'Antigravity CLI',   cmd = '$env:PATH = "$env:LOCALAPPDATA\\agy\\bin;$env:PATH"; cd C:\\claude; agy' },
     { id = 'lazygit',    label = 'lazygit',           cmd = 'cd $HOME\\dotfiles; lazygit' },
     { id = 'dashboard',  label = 'Todoist',            cmd = '& $HOME\\dotfiles\\wezterm\\todoist.ps1' },
     { id = 'calendar',   label = '📅 カレンダー',        cmd = '& $HOME\\dotfiles\\wezterm\\calendar.ps1' },
-    -- 会社Codexは CODEX_HOME を明示除去（同一ペインで個人/Fugu起動後の残留対策。ランチャーは send_text 方式でシェルを引き継ぐため）
-    { id = 'codex',      label = 'Codex CLI (会社)',    cmd = 'Remove-Item Env:CODEX_HOME -ErrorAction SilentlyContinue; cd C:\\claude; codex' },
-    { id = 'codex-personal', label = 'Codex CLI (個人)', cmd = '$env:CODEX_HOME = "$HOME\\.codex-personal"; codex' },
+    -- Codexはデスクトップ既定(~/.codex)と分離し、起動前にメールアドレスまで検証する。
+    -- 会社=~/.codex-work / 個人=~/.codex-personal。誤アカウントではCodexを起動しない。
+    { id = 'codex',      label = 'Codex CLI (会社)',    cmd = 'cd C:\\claude; & "$HOME\\dotfiles\\wezterm\\codex-account.ps1" -Account work' },
+    { id = 'codex-personal', label = 'Codex CLI (個人)', cmd = 'cd C:\\claude; & "$HOME\\dotfiles\\wezterm\\codex-account.ps1" -Account personal' },
     { id = 'fugu',       label = '🐟 Sakana Fugu',      cmd = '$env:CODEX_HOME = "$HOME\\.codex-personal"; cd C:\\claude; doppler run --project sakana-ai --config prd -- codex-fugu' },
     { id = 'fugu-ultra', label = '🐡 Sakana Fugu Ultra', cmd = '$env:CODEX_HOME = "$HOME\\.codex-personal"; cd C:\\claude; doppler run --project sakana-ai --config prd -- codex-fugu-ultra' },
     { id = 'grok',       label = 'Grok Build',         cmd = 'cd C:\\claude; grok' },
+    -- ローカルLLM (LM Studio) の素のチャット。初回は選択モデルのメモリ読込に時間がかかる（9B級で1分前後、35B-A3Bは更に重い）。
+    -- ※ こちらはファイルを読めない（lms chat にツール実行の仕組みがない）。ファイル操作は下の 🛠 側を使う。
+    -- modelKey は `lms ls --json` 準拠（2026-08-07 時点: Nemotron / Gemma / Qwen3.6-35B-A3B / LFM）。
+    -- 旧 qwen3.5-4b-rys-ud はコーダー枠を Qwen3.6-35B-A3B に入れ替え（ランチャーからは外した。ディスク上に残っていても可）。
+    { id = 'lms-nemotron',  label = '🤖 LLM: Nemotron 9B (壁打ち・日本語)', cmd = lms_chat('nvidia-nemotron-nano-9b-v2-japanese') },
+    { id = 'lms-gemma',     label = '🤖 LLM: Gemma 4 E4B (画像可)',   cmd = lms_chat('google/gemma-4-e4b') },
+    -- Qwen3.6 35B-A3B (Q4_K_M / ~22GB / MoE active~3B)。ローカルコーダー枠。
+    { id = 'lms-qwen',      label = '🤖 LLM: Qwen3.6 35B-A3B (コーダー)', cmd = lms_chat('qwen/qwen3.6-35b-a3b') },
+    -- LFM2.5 2.6B (LiquidAI, Q5_K_M / 1.94GB / 最大128kコンテキスト)。軽作業・高速。
+    { id = 'lms-lfm',       label = '🤖 LLM: LFM2.5 2.6B (軽作業・高速)', cmd = lms_chat('lfm2.5-2.6b') },
+    -- ローカルLLMエージェント（opencode 経由。ファイル読み書き・編集まで可能）。cwd=C:\claude。
+    -- チャット側と同じ4モデルをすべて 🛠 対応。opencode.json の provider.lmstudio.models と modelKey を揃えること。
+    -- LFM2.5 は tool use 学習済みで、LM Studio の OpenAI 互換APIに read_file 定義を渡すと
+    -- 正しく tool_calls を返すことを確認済み（2026-08-05 検証。ロードも約6秒と速い）。
+    -- Qwen3.6-35B-A3B は ~22GB のため agent 起動時の load が重い。context は他と同じ 32k 既定。
+    { id = 'oc-nemotron',   label = '🛠 LLM Agent: Nemotron 9B (壁打ち・ファイル可)', cmd = lms_agent('nvidia-nemotron-nano-9b-v2-japanese') },
+    { id = 'oc-gemma',      label = '🛠 LLM Agent: Gemma 4 E4B (画像・ファイル可)', cmd = lms_agent('google/gemma-4-e4b') },
+    { id = 'oc-qwen',       label = '🛠 LLM Agent: Qwen3.6 35B-A3B (コーダー・ファイル可)', cmd = lms_agent('qwen/qwen3.6-35b-a3b') },
+    { id = 'oc-lfm',        label = '🛠 LLM Agent: LFM2.5 2.6B (軽作業・高速)', cmd = lms_agent('lfm2.5-2.6b') },
     { id = 'yazi',       label = 'yazi',              cmd = 'yazi' },
     { id = 'shell',      label = 'PowerShell',        cmd = '' },
   }
@@ -89,7 +133,7 @@ end
 -- └──────────┴────────────────────┴──────────────────┘
 --   左 = ⑦Todoist / ⑥カレンダー / ⑤Codex自動受信watcher（細い列・3分割）
 --   中 = 上=①会社Claude司令/壁打ち, 下=④Grok Build(xAI)
---   右 = 上 ②Codexレビュー / 下 ③個人Claude実行(C:\tamura)
+--   右 = 上 ②Codexレビュー / 下 ③個人Claude実行(C:\claude)
 --   ※ yazi / lazygit は常駐から外し F9 ランチャーで随時起動
 --   ※ watcher は右上Codexペインの実IDを gui-startup から動的注入（CODEX_PANE固定値の罠を解消）
 -- Mac（個人アカウント中心。AIの重複を避け、右下を実行・検証Shellにする）:
@@ -155,10 +199,10 @@ wezterm.on('gui-startup', function(cmd)
       middle_pane:send_text('cd C:\\claude; $env:CLAUDE_CONFIG_DIR = "$HOME\\.claude"; claude\n')
       -- ④ 中下: Grok Build（xAI 実行ワーカー）。cwd=C:\claude で AGENTS.md/MCP を継承。grok は ~/.grok/bin（User PATH 済）。
       middle_bottom:send_text('cd C:\\claude; grok\n')
-      -- ② 右上: レビュー専用（Codex・会社アカウント=既定 ~/.codex。個人は F9 ランチャー or CODEX_HOME=~/.codex-personal）
-      right_pane:send_text('cd C:\\claude; codex\n')
+      -- ② 右上: レビュー専用（会社Codex）。デスクトップ既定(~/.codex・個人)とは認証領域を分離し、起動前にID検証。
+      right_pane:send_text('cd C:\\claude; & "$HOME\\dotfiles\\wezterm\\codex-account.ps1" -Account work\n')
       -- ③ 右下: 実行ワーカー（個人Claude）
-      right_bottom:send_text('cd C:\\tamura; $env:CLAUDE_CONFIG_DIR = "$HOME\\.claude-personal"; claude\n')
+      right_bottom:send_text('cd C:\\claude; $env:CLAUDE_CONFIG_DIR = "$HOME\\.claude-personal"; claude\n')
     else
       -- Mac: ①Claudeで考える → ④Grokで作る → ③Shellで動かす → ②Codexでレビュー
       -- ⑦ 左上: Todoist
@@ -584,6 +628,10 @@ config.keys = {
   { key = 'w', mods = 'CTRL|SHIFT', action = act.CloseCurrentPane { confirm = true } },
   -- Pane zoom: 現在ペインを一時最大化⇔もう一度で復帰 (Ctrl+Shift+Z)
   { key = 'z', mods = 'CTRL|SHIFT', action = act.TogglePaneZoomState },
+  -- Pane repair: ローカルLLM(lms chat等)終了後にConPTYの表示がズレて
+  -- 上下ペインが繋がって見える現象向けの復旧ショートカット。
+  -- ズームON→OFFを瞬時に往復させ、ペイン境界の再計算・再描画を強制する (Ctrl+Shift+R)
+  { key = 'r', mods = 'CTRL|SHIFT', action = act.Multiple { act.TogglePaneZoomState, act.TogglePaneZoomState } },
   -- Pane select: 番号オーバーレイでペインへジャンプ (F8)
   -- ※表示される番号は分割順の pane index。公式呼称①〜⑦とは一致しない。
   { key = 'F8', mods = 'NONE', action = act.PaneSelect { alphabet = '1234567890', mode = 'Activate' } },

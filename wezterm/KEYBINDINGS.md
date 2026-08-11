@@ -1,6 +1,6 @@
 # WezTerm キーバインド & 機能ガイド
 
-設定ファイル: `~/dotfiles/wezterm/wezterm.lua`（最終更新: 2026-07-13）
+設定ファイル: `~/dotfiles/wezterm/wezterm.lua`（最終更新: 2026-08-07）
 
 ---
 
@@ -84,18 +84,37 @@ WezTerm 起動時に7ペインが自動展開される。比率 = 左2 : 中4 : 
 | Claude Code (Clean) | `CLAUDE_CONFIG_DIR=~/.claude-clean claude --model opus --tools default ...` |
 | Claude Code (会社 Clean) | `CLAUDE_CONFIG_DIR=~/.claude-work-clean claude --model opus --tools default ...` |
 | Gemini CLI | `cd C:\claude; gemini` |
+| Antigravity CLI | `cd C:\claude; agy`（PATHに `%LOCALAPPDATA%\agy\bin` を前置） |
 | lazygit | `cd ~/dotfiles; lazygit` |
 | Todoist | `todoist.ps1` |
 | 📅 カレンダー | `calendar.ps1` |
-| Codex CLI (会社) | `cd C:\claude; codex` |
-| Codex CLI (個人) | `CODEX_HOME=~/.codex-personal codex` |
+| Codex CLI (会社) | `codex-account.ps1 -Account work`（`CODEX_HOME=~/.codex-work`、`tamura.k@t-sss.co.jp` を起動前検証） |
+| Codex CLI (個人) | `codex-account.ps1 -Account personal`（`CODEX_HOME=~/.codex-personal`、`densontamra@gmail.com` を起動前検証） |
 | 🐟 Sakana Fugu | `doppler run --project sakana-ai --config prd -- codex-fugu` |
 | 🐡 Sakana Fugu Ultra | `doppler run --project sakana-ai --config prd -- codex-fugu-ultra` |
 | Grok Build | `cd C:\claude; grok` |
+| 🤖 LLM: Nemotron 9B (壁打ち・日本語) | `lms chat nvidia-nemotron-nano-9b-v2-japanese` |
+| 🤖 LLM: Gemma 4 E4B (画像可) | `lms chat google/gemma-4-e4b` |
+| 🤖 LLM: Qwen3.6 35B-A3B (コーダー) | `lms chat qwen/qwen3.6-35b-a3b` |
+| 🤖 LLM: LFM2.5 2.6B (軽作業・高速) | `lms chat lfm2.5-2.6b` |
+| 🛠 LLM Agent: Nemotron 9B | opencode + `lmstudio/nvidia-nemotron-nano-9b-v2-japanese` |
+| 🛠 LLM Agent: Gemma 4 E4B | opencode + `lmstudio/google/gemma-4-e4b` |
+| 🛠 LLM Agent: Qwen3.6 35B-A3B | opencode + `lmstudio/qwen/qwen3.6-35b-a3b` |
+| 🛠 LLM Agent: LFM2.5 2.6B | opencode + `lmstudio/lfm2.5-2.6b` |
 | yazi | `yazi` |
 | PowerShell | 何もしない（シェルに戻る） |
 
+※ 🤖 は `lms chat`（ファイル操作不可）。🛠 は opencode 経由でファイル読み書き可。modelKey は `lms ls` と `~/.config/opencode/opencode.json` の `provider.lmstudio.models` を揃える。
+
 Mac は Claude 系の CONFIG_DIR 割当と Todoist スクリプトが異なる（Fugu / カレンダー / Codex個人 は Windows のみ）。
+
+### Codexアカウント分離（Windows）
+
+- Codexデスクトップ: 既定の `~/.codex`（個人）。WezTermからは変更しない
+- WezTerm会社Codex: `~/.codex-work`
+- WezTerm個人Codex / Fugu: `~/.codex-personal`
+- 初回または誤アカウント時はデバイスコード認証を開始し、期待するメールアドレスと一致しない限りCodex本体を起動しない
+- 認証状態だけ確認: `& $HOME\dotfiles\wezterm\codex-account.ps1 -Account work -CheckOnly`（個人は `work` を `personal` に変更）
 
 ---
 
