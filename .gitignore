@@ -3,3 +3,11 @@
 *.bak.*
 .bak.*
 *.bak*
+
+# Python のキャッシュ
+__pycache__/
+*.pyc
+
+# OS が生成するファイル
+.DS_Store
+Thumbs.db
