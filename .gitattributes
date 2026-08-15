@@ -1,0 +1,20 @@
+# 改行コードの統一（会社PC=Windows と Mac の両方で編集するため）
+# これが無いと同じ内容でも全行差分になり、無用な競合が起きる
+
+# 既定: テキストは自動判定し、リポジトリにも作業ツリーにも LF で置く
+* text=auto eol=lf
+
+# 明示指定（拡張子ごと）
+*.sh   text eol=lf
+*.py   text eol=lf
+*.lua  text eol=lf
+*.md   text eol=lf
+
+# PowerShell は Windows 側で実行するため CRLF を維持する
+*.ps1  text eol=crlf
+
+# バイナリ（差分・改行変換の対象外）
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.pyc  binary
