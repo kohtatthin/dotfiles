@@ -205,20 +205,21 @@ wezterm.on('gui-startup', function(cmd)
       right_bottom:send_text('cd C:\\claude; $env:CLAUDE_CONFIG_DIR = "$HOME\\.claude-personal"; claude\n')
     else
       -- Mac: ①Claudeで考える → ④Grokで作る → ③Shellで動かす → ②Codexでレビュー
+      -- send_text は Enter を \r で送る（\n だけだとプロンプトに文字が残って実行されないことがある）
       -- ⑦ 左上: Todoist
-      pane:send_text('bash ~/dotfiles/wezterm/todoist.sh\n')
+      pane:send_text('bash ~/dotfiles/wezterm/todoist.sh\r')
       -- ⑥ 左中: カレンダー
-      left_mid:send_text('cal\n')
+      left_mid:send_text('cal\r')
       -- ⑤ 左下: lazygit（Macでは軽量な常駐Gitビューとして維持）
-      left_bottom:send_text('cd ~/dotfiles && lazygit\n')
+      left_bottom:send_text('cd ~/dotfiles && lazygit\r')
       -- ① 中上: 個人Claudeの司令／壁打ち
-      middle_pane:send_text('claude\n')
+      middle_pane:send_text('claude\r')
       -- ④ 中下: Grok Buildの実装ワーカー
-      middle_bottom:send_text('cd ~/claude && grok\n')
+      middle_bottom:send_text('cd ~/claude && grok\r')
       -- ② 右上: Codexレビュー
-      right_pane:send_text('cd ~/claude && codex\n')
-      -- ③ 右下: テスト・ログ・開発サーバー用の通常Shell
-      right_bottom:send_text('cd ~/claude\n')
+      right_pane:send_text('cd ~/claude && codex\r')
+      -- ③ 右下: テスト・ログ・開発サーバー用の通常Shell（起動確認用に pwd を出す）
+      right_bottom:send_text("cd ~/claude && clear && pwd && echo '[③ Shell] ready'\r")
     end
   end)
 end)
@@ -615,6 +616,22 @@ local brightness_choices = {
   { id = '_reset', label = 'Reset to default' },
 }
 
+-- ランチャー（F9 / Cmd+Shift+9）共通アクション
+local launcher_action = act.InputSelector {
+  title = '  Launch App',
+  choices = launcher_choices,
+  action = wezterm.action_callback(function(window, pane, id, label)
+    if not id then return end
+    local cmd = launcher_cmds[id]
+    -- 現在のプロセスを停止 (Ctrl+C x2 + Enter)
+    pane:send_text('\x03\x03\r')
+    -- 新しいコマンドを送信（shell以外）
+    if cmd ~= '' then
+      pane:send_text(cmd .. '\r')
+    end
+  end),
+}
+
 -- キーバインド
 config.keys = {
   -- Alt+Enter をターミナルに渡す（Claude Codeの改行用）
@@ -784,23 +801,11 @@ config.keys = {
       end),
     },
   },
-  -- Launcher menu: アプリ切り替え (F9)
-  { key = 'F9', mods = 'NONE',
-    action = act.InputSelector {
-      title = '  Launch App',
-      choices = launcher_choices,
-      action = wezterm.action_callback(function(window, pane, id, label)
-        if not id then return end
-        local cmd = launcher_cmds[id]
-        -- 現在のプロセスを停止 (Ctrl+C x2 + Enter)
-        pane:send_text('\x03\x03\r\n')
-        -- 新しいコマンドを送信（shell以外）
-        if cmd ~= '' then
-          pane:send_text(cmd .. '\r\n')
-        end
-      end),
-    },
-  },
+  -- Launcher menu: アプリ切り替え
+  -- Win/Mac とも F9。Mac では Mission Control 等に F9 を奪われやすいので
+  -- Cmd+Shift+9 も同じメニューに割り当てる（テーマ系の Mac 代替と同じ方針）。
+  { key = 'F9', mods = 'NONE', action = launcher_action },
+  { key = '9', mods = 'CMD|SHIFT', action = launcher_action },
 }
 
 -- ===== AI トークン残量ステータスライン =====
