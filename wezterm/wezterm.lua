@@ -43,6 +43,8 @@ if is_windows then
     -- 個人=.claude-personal↔C:\claude / 会社=.claude↔C:\claude（2026-07-30: 個人の作業ディレクトリを C:\tamura から C:\claude へ変更）。
     { id = 'claude',     label = 'Claude Code',       cmd = 'cd C:\\claude; $env:CLAUDE_CONFIG_DIR = "$HOME\\.claude-personal"; claude' },
     { id = 'claude-work', label = 'Claude Code (会社)', cmd = 'cd C:\\claude; $env:CLAUDE_CONFIG_DIR = "$HOME\\.claude"; claude' },
+    -- 旧世代モデルを明示指定して起動する枠（既定の opus は最新世代に追随するため別枠にする）。
+    { id = 'claude-opus46', label = 'Claude Code (Opus 4.6)', cmd = 'cd C:\\claude; $env:CLAUDE_CONFIG_DIR = "$HOME\\.claude-personal"; claude --model claude-opus-4-6' },
     { id = 'claude-clean', label = 'Claude Code (Clean)', cmd = 'cd C:\\claude; $env:CLAUDE_CONFIG_DIR = "$HOME\\.claude-clean"; claude --model opus --tools default --disable-slash-commands --strict-mcp-config --setting-sources user' },
     { id = 'claude-work-clean', label = 'Claude Code (会社 Clean)', cmd = 'cd C:\\claude; $env:CLAUDE_CONFIG_DIR = "$HOME\\.claude-work-clean"; claude --model opus --tools default --disable-slash-commands --strict-mcp-config --setting-sources user' },
     { id = 'gemini',     label = 'Gemini CLI',        cmd = 'cd C:\\claude; gemini' },
@@ -55,6 +57,8 @@ if is_windows then
     -- 会社=~/.codex-work / 個人=~/.codex-personal。誤アカウントではCodexを起動しない。
     { id = 'codex',      label = 'Codex CLI (会社)',    cmd = 'cd C:\\claude; & "$HOME\\dotfiles\\wezterm\\codex-account.ps1" -Account work' },
     { id = 'codex-personal', label = 'Codex CLI (個人)', cmd = 'cd C:\\claude; & "$HOME\\dotfiles\\wezterm\\codex-account.ps1" -Account personal' },
+    -- AI委譲キューはペイン注入ではなく、必要時だけ会社Claudeを非対話起動する。WezTerm常駐には依存しない。
+    { id = 'delegate-queue', label = '📨 AI委譲キュー', cmd = 'cd C:\\claude; ai-delegate watch' },
     { id = 'fugu',       label = '🐟 Sakana Fugu',      cmd = '$env:CODEX_HOME = "$HOME\\.codex-personal"; cd C:\\claude; doppler run --project sakana-ai --config prd -- codex-fugu' },
     { id = 'fugu-ultra', label = '🐡 Sakana Fugu Ultra', cmd = '$env:CODEX_HOME = "$HOME\\.codex-personal"; cd C:\\claude; doppler run --project sakana-ai --config prd -- codex-fugu-ultra' },
     { id = 'grok',       label = 'Grok Build',         cmd = 'cd C:\\claude; grok' },
@@ -77,6 +81,17 @@ if is_windows then
     { id = 'oc-gemma',      label = '🛠 LLM Agent: Gemma 4 E4B (画像・ファイル可)', cmd = lms_agent('google/gemma-4-e4b') },
     { id = 'oc-qwen',       label = '🛠 LLM Agent: Qwen3.6 35B-A3B (コーダー・ファイル可)', cmd = lms_agent('qwen/qwen3.6-35b-a3b') },
     { id = 'oc-lfm',        label = '🛠 LLM Agent: LFM2.5 2.6B (軽作業・高速)', cmd = lms_agent('lfm2.5-2.6b') },
+    -- Hermes Agent + Wiki プリフェッチ（llm-wiki＋AI作業ログの参照）。推論はLM StudioのLFM2.5のみで課金ゼロ。
+    -- hermes.exe は venv 内にありPATH未登録のためフルパスで呼ぶ。設定は %LOCALAPPDATA%\hermes\config.yaml。
+    -- 2026-08-12: ローカルLLMのツール往復は遅すぎ（9Bで1問4〜10分）かつ小型モデルはツール選択を誤るため、プリフェッチ方式に変更。
+    --   起動時に prefetch_wiki.py が Wiki索引＋直近7日のAI作業ログを wiki-session/AGENTS.md に書き出し、
+    --   Hermes が cwd の AGENTS.md として自動注入する。モデルはツールなし（-t none の警告は無害）＋思考オフで応答。
+    --   ツール不要になったため高速なLFM2.5を採用（実測96秒/問。Nemotron 9Bは同条件で4〜7分）。
+    --   Hermes は最低 64K コンテキストを要求するため --context-length 65536 を維持すること。
+    { id = 'hermes',        label = '🪽 Hermes Agent (Wiki・作業ログ参照)', cmd = '$env:PATH = "$HOME\\.lmstudio\\bin;$env:PATH"; lms server start; lms unload --all; '
+      .. 'lms load lfm2.5-2.6b --context-length 65536 --ttl 1800 --yes; '
+      .. '& "$env:LOCALAPPDATA\\Programs\\Python\\Python313\\python.exe" C:\\claude\\hermes\\prefetch_wiki.py; cd C:\\claude\\hermes\\wiki-session; '
+      .. '& "$env:LOCALAPPDATA\\hermes\\hermes-agent\\venv\\Scripts\\hermes.exe" chat --provider lmstudio --model lfm2.5-2.6b --toolsets none --reasoning none' },
     { id = 'yazi',       label = 'yazi',              cmd = 'yazi' },
     { id = 'shell',      label = 'PowerShell',        cmd = '' },
   }
@@ -121,21 +136,23 @@ end
 --   ①〜⑦の具体的な役割はOS別の図を参照（位置番号は両OS共通）
 --   ※「左上／右下」等の位置呼びは廃止。必ず番号（①〜⑦）で呼ぶこと。
 --   ※ 2026-06-22: ④を会社Claudeワーカー(cc-w)から Grok Build に置換。agmsg 監視デーモン撤去（手動 send.sh のみ残置）。
+--   ※ 2026-08-14: ②を会社Codex→会社Claude実行ワーカー、③を個人Claude→会社Codexレビューへ入れ替え。
+--                 上段=Claude Code 2枚（①司令・②実行）、下段=④Grok・③Codex。個人Claudeは常駐から除外。
 -- ===================================================================
 --
 -- Windows（左カラムだけ3分割。図中の丸数字が上記の番号）:
 -- ┌──────────┬────────────────────┬──────────────────┐
--- │⑦Todoist  │① 司令／壁打ち(会社) │② Codex (レビュー) │
+-- │⑦Todoist  │① 司令／壁打ち(会社) │② 実行ワーカー(会社)│
 -- ├──────────┤                    │                  │
 -- │⑥カレンダー│────────────────────│──────────────────│
--- ├──────────┤④ Grok Build (xAI)  │③ 実行ワーカー(個人)│
--- │⑤watcher  │                    │                  │
+-- ├──────────┤④ Grok Build (xAI)  │③ Codex (レビュー) │
+-- │⑤agmsg    │                    │                  │
 -- └──────────┴────────────────────┴──────────────────┘
---   左 = ⑦Todoist / ⑥カレンダー / ⑤Codex自動受信watcher（細い列・3分割）
+--   左 = ⑦Todoist / ⑥カレンダー / ⑤agmsg未ack一覧（細い列・3分割）
 --   中 = 上=①会社Claude司令/壁打ち, 下=④Grok Build(xAI)
---   右 = 上 ②Codexレビュー / 下 ③個人Claude実行(C:\claude)
+--   右 = 上 ②会社Claude実行ワーカー / 下 ③会社Codexレビュー
+--   上段が Claude Code 2枚（①司令・②実行）、下段が Grok・Codex の横並び。
 --   ※ yazi / lazygit は常駐から外し F9 ランチャーで随時起動
---   ※ watcher は右上Codexペインの実IDを gui-startup から動的注入（CODEX_PANE固定値の罠を解消）
 -- Mac（個人アカウント中心。AIの重複を避け、右下を実行・検証Shellにする）:
 -- ┌──────────┬────────────────────┬──────────────────┐
 -- │⑦Todoist  │① Claude 司令／壁打ち│② Codex (レビュー) │
@@ -165,7 +182,7 @@ wezterm.on('gui-startup', function(cmd)
       size = 2 / 3,
     }
 
-    -- 3) 各カラムを上下分割。左カラムだけ3分割（上=Todoist / 中=カレンダー / 下=watcher）
+    -- 3) 各カラムを上下分割。左カラムだけ3分割（上=Todoist / 中=カレンダー / 下=AI委譲キュー）
     local left_mid = pane:split {
       direction = 'Bottom',
       size = 2 / 3,   -- pane=左上(1/3), left_mid=下2/3
@@ -189,20 +206,25 @@ wezterm.on('gui-startup', function(cmd)
 
     if is_windows then
       -- ⑦ 左上: タスク管理ボード（Todoist）
-      pane:send_text('& $HOME\\dotfiles\\wezterm\\todoist.ps1\n')
+      pane:send_text('& $HOME\\dotfiles\\wezterm\\todoist.ps1\r\n')
       -- ⑥ 左中: カレンダー（calendar.ps1。暫定=月表示 → 後日 Google Calendar 連携へ中身を差し替え）
-      left_mid:send_text('& $HOME\\dotfiles\\wezterm\\calendar.ps1\n')
-      -- ⑤ 左下: AI使用量ライブ（Claude/Codex の枠消費を 30s ごとに表示）。2026-06-22 Codex watcher から転換。
-      left_bottom:send_text('& $HOME\\dotfiles\\wezterm\\ai_usage_pane.ps1\n')
+      left_mid:send_text('& $HOME\\dotfiles\\wezterm\\calendar.ps1\r\n')
+      -- ⑤ 左下: agmsg v2 の未ack一覧を常時表示（表示のみ・ペインへの注入はしない）。
+      -- 2026-08-14: ai-delegate watch から差し替え。委譲キューは F9 ランチャー「📨 AI委譲キュー」で随時起動。
+      left_bottom:send_text('cd C:\\claude; agmsg watch\r\n')
       -- ① 中上: 司令／壁打ち（会社Claude）。CLAUDE_CONFIG_DIR=.claude を明示。
-      -- 2026-06-22: agmsg 監視撤去に伴い actas 指定は廃止（手動 send.sh のみ運用）。
-      middle_pane:send_text('cd C:\\claude; $env:CLAUDE_CONFIG_DIR = "$HOME\\.claude"; claude\n')
+      -- AGMSG_AGENT は agmsg v2 の identity。①②は project も type も同一のため、
+      -- 推論ではなくここで固定する（旧agmsgのidentity衝突を構造的に回避）。
+      middle_pane:send_text('cd C:\\claude; $env:CLAUDE_CONFIG_DIR = "$HOME\\.claude"; $env:AGMSG_AGENT = "commander"; claude --name commander\r\n')
       -- ④ 中下: Grok Build（xAI 実行ワーカー）。cwd=C:\claude で AGENTS.md/MCP を継承。grok は ~/.grok/bin（User PATH 済）。
-      middle_bottom:send_text('cd C:\\claude; grok\n')
-      -- ② 右上: レビュー専用（会社Codex）。デスクトップ既定(~/.codex・個人)とは認証領域を分離し、起動前にID検証。
-      right_pane:send_text('cd C:\\claude; & "$HOME\\dotfiles\\wezterm\\codex-account.ps1" -Account work\n')
-      -- ③ 右下: 実行ワーカー（個人Claude）
-      right_bottom:send_text('cd C:\\claude; $env:CLAUDE_CONFIG_DIR = "$HOME\\.claude-personal"; claude\n')
+      -- Grok Build にはフック機構がないため、受信は手動 `agmsg inbox` のみ（2026-08-14 実機確認）。
+      middle_bottom:send_text('cd C:\\claude; $env:AGMSG_AGENT = "grok"; grok\r\n')
+      -- ② 右上: 実行ワーカー（会社Claude・Sonnet固定）。①司令と同一アカウント＝Team枠のためレート制限は①と共有。
+      -- セッション内で /model により変更可能（起動時の既定がSonnetになるだけ）。
+      -- 2026-08-14: 個人Claudeを常駐から外し、①②を会社Claude 2枚（司令／実行）の横並びへ変更。
+      right_pane:send_text('cd C:\\claude; $env:CLAUDE_CONFIG_DIR = "$HOME\\.claude"; $env:AGMSG_AGENT = "worker"; claude --model sonnet --name worker\r\n')
+      -- ③ 右下: レビュー専用（会社Codex）。デスクトップ既定(~/.codex・個人)とは認証領域を分離し、起動前にID検証。
+      right_bottom:send_text('cd C:\\claude; $env:AGMSG_AGENT = "codex"; & "$HOME\\dotfiles\\wezterm\\codex-account.ps1" -Account work\r\n')
     else
       -- Mac: ①Claudeで考える → ④Grokで作る → ③Shellで動かす → ②Codexでレビュー
       -- ⑦ 左上: Todoist
@@ -341,6 +363,26 @@ config.color_schemes = {
 }
 
 config.color_scheme = 'Tokyo Night'
+-- ===== 作業場ダーク =====
+-- WezTerm はペイン境界の太さを変更できないため、高コントラストの境界色と
+-- 非アクティブペインの減光を組み合わせて、仕切りを太く見せる。
+config.colors = {
+  split = '#7AA2F7',
+  cursor_bg = '#00F5FF',
+  cursor_fg = '#07111A',
+  cursor_border = '#B8FBFF',
+  compose_cursor = '#FFB84D',
+}
+config.inactive_pane_hsb = {
+  saturation = 0.70,
+  brightness = 0.58,
+}
+-- アクティブペインだけに現れるカーソルを、入力位置の発光インジケーターとして使う。
+config.default_cursor_style = 'BlinkingBlock'
+config.cursor_blink_rate = 600
+config.cursor_blink_ease_in = 'Constant'
+config.cursor_blink_ease_out = 'Constant'
+config.animation_fps = 10
 config.automatically_reload_config = true
 -- 2026-06-22: ④Grok Build は TUI が背景色でセルを塗りつぶすため壁紙が透けない。
 -- WezTerm はペイン個別の透過を持たないので、色付きセル背景の不透明度を全体で下げて透かす。
@@ -356,7 +398,7 @@ config.initial_rows = 50
 local wallpaper_file
 local wallpaper_dir
 if is_windows then
-  wallpaper_file = wezterm.home_dir .. '/dotfiles/wezterm/wallpaper_win.jpg'
+  wallpaper_file = wezterm.home_dir .. '/dotfiles/wezterm/wallpapers/workshop-brutalist-4k.png'
   wallpaper_dir = wezterm.home_dir .. '\\dotfiles\\wezterm\\wallpapers\\'
 else
   wallpaper_file = wezterm.home_dir .. '/dotfiles/wezterm/wallpaper.jpg'
@@ -396,8 +438,9 @@ if is_windows then
   config.default_cwd = 'C:/claude'
   config.background = {
     {
-      source = { File = wezterm.home_dir .. '/dotfiles/wezterm/wallpaper_win.jpg' },
-      hsb = { brightness = 0.1 },
+      source = { File = wallpaper_file },
+      -- 元画像を暗色に調整済みなので、質感が残る程度の明るさにする。
+      hsb = { brightness = 0.45 },
       opacity = 0.9,
       horizontal_align = 'Center',
       vertical_align = 'Middle',
@@ -456,10 +499,18 @@ config.set_environment_variables = env_vars
 -- 用途: 個人/会社アカウントの視覚的な区別
 local profiles = {
   {
-    id = 'personal',
-    label = '🏠 個人用 — Tokyo Night + 壁紙',
+    id = 'workshop',
+    label = '🧱 作業場 — Tokyo Night + Brutalist 4K',
     color_scheme = 'Tokyo Night',
-    wallpaper = true,           -- デフォルト壁紙を使う
+    wallpaper = 'workshop-brutalist-4k.png',
+    brightness = 0.45,
+    window_background_opacity = nil,
+  },
+  {
+    id = 'personal',
+    label = '🏠 個人用 — Tokyo Night + 従来の壁紙',
+    color_scheme = 'Tokyo Night',
+    wallpaper = 'legacy',       -- 変更前の壁紙を残す
     brightness = 0.1,
     window_background_opacity = nil,  -- デフォルト
   },
@@ -509,6 +560,11 @@ local profiles = {
 local function resolve_wallpaper(profile)
   if profile.wallpaper == true then
     return wallpaper_file
+  elseif profile.wallpaper == 'legacy' then
+    if is_windows then
+      return wezterm.home_dir .. '/dotfiles/wezterm/wallpaper_win.jpg'
+    end
+    return wezterm.home_dir .. '/dotfiles/wezterm/wallpaper.jpg'
   elseif profile.wallpaper and profile.wallpaper ~= false then
     if is_windows then
       return wezterm.home_dir .. '\\dotfiles\\wezterm\\wallpapers\\' .. profile.wallpaper
