@@ -48,9 +48,9 @@ WezTerm 起動時に7ペインが自動展開される。比率 = 左2 : 中4 : 
 | ① | 個人Claude 司令／壁打ち |
 | ④ | Grok Build（実装ワーカー） |
 | ② | Codex レビュー |
-| ③ | Shell（テスト・ログ・開発サーバー用） |
+| ③ | Claude Code (会社)（`CLAUDE_CONFIG_DIR=~/.claude-work`） |
 
-※ yazi / lazygit(Win) / Gemini は常駐から外し、F9 ランチャーで随時起動。
+※ yazi / lazygit(Win) / Gemini / Shell(Mac) は常駐から外し、F9 ランチャーで随時起動。
 
 ---
 
