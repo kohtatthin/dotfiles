@@ -138,6 +138,7 @@ end
 --   ※ 2026-06-22: ④を会社Claudeワーカー(cc-w)から Grok Build に置換。agmsg 監視デーモン撤去（手動 send.sh のみ残置）。
 --   ※ 2026-08-14: ②を会社Codex→会社Claude実行ワーカー、③を個人Claude→会社Codexレビューへ入れ替え。
 --                 上段=Claude Code 2枚（①司令・②実行）、下段=④Grok・③Codex。個人Claudeは常駐から除外。
+--   ※ 2026-08-16: Mac ③を Shell → 会社Claude（~/.claude-work）に差し替え。実行・検証Shellは F9 ランチャーへ。
 -- ===================================================================
 --
 -- Windows（左カラムだけ3分割。図中の丸数字が上記の番号）:
@@ -153,15 +154,15 @@ end
 --   右 = 上 ②会社Claude実行ワーカー / 下 ③会社Codexレビュー
 --   上段が Claude Code 2枚（①司令・②実行）、下段が Grok・Codex の横並び。
 --   ※ yazi / lazygit は常駐から外し F9 ランチャーで随時起動
--- Mac（個人アカウント中心。AIの重複を避け、右下を実行・検証Shellにする）:
+-- Mac（個人アカウント中心。③だけ会社Claudeを常駐。実行・検証Shellは F9）:
 -- ┌──────────┬────────────────────┬──────────────────┐
 -- │⑦Todoist  │① Claude 司令／壁打ち│② Codex (レビュー) │
 -- ├──────────┤                    │                  │
 -- │⑥カレンダー│────────────────────│──────────────────│
--- ├──────────┤④ Grok Build (実装) │③ Shell (実行/検証)│
+-- ├──────────┤④ Grok Build (実装) │③ Claude Code (会社)│
 -- │⑤lazygit  │                    │                  │
 -- └──────────┴────────────────────┴──────────────────┘
---   ※ Gemini / yazi は常駐から外し F9 ランチャーで随時起動
+--   ※ Gemini / yazi / Shell は常駐から外し F9 ランチャーで随時起動
 wezterm.on('gui-startup', function(cmd)
   local tab, pane, window = mux.spawn_window(cmd or {})
   window:gui_window():maximize()
@@ -226,7 +227,7 @@ wezterm.on('gui-startup', function(cmd)
       -- ③ 右下: レビュー専用（会社Codex）。デスクトップ既定(~/.codex・個人)とは認証領域を分離し、起動前にID検証。
       right_bottom:send_text('cd C:\\claude; $env:AGMSG_AGENT = "codex"; & "$HOME\\dotfiles\\wezterm\\codex-account.ps1" -Account work\r\n')
     else
-      -- Mac: ①Claudeで考える → ④Grokで作る → ③Shellで動かす → ②Codexでレビュー
+      -- Mac: ①個人Claudeで考える → ④Grokで作る → ③会社Claudeで動かす → ②Codexでレビュー
       -- send_text は Enter を \r で送る（\n だけだとプロンプトに文字が残って実行されないことがある）
       -- ⑦ 左上: Todoist
       pane:send_text('bash ~/dotfiles/wezterm/todoist.sh\r')
@@ -240,8 +241,9 @@ wezterm.on('gui-startup', function(cmd)
       middle_bottom:send_text('cd ~/claude && grok\r')
       -- ② 右上: Codexレビュー
       right_pane:send_text('cd ~/claude && codex\r')
-      -- ③ 右下: テスト・ログ・開発サーバー用の通常Shell（起動確認用に pwd を出す）
-      right_bottom:send_text("cd ~/claude && clear && pwd && echo '[③ Shell] ready'\r")
+      -- ③ 右下: 会社Claude。CLAUDE_CONFIG_DIR=~/.claude-work を明示（個人の ~/.claude と分離）。
+      -- 2026-08-16: 実行・検証Shellをここに置いていたが、会社用Claude常駐に差し替え。Shellは F9。
+      right_bottom:send_text('cd ~/claude && CLAUDE_CONFIG_DIR=~/.claude-work claude --model opus\r')
     end
   end)
 end)
