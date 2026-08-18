@@ -1,6 +1,6 @@
 # WezTerm キーバインド & 機能ガイド
 
-設定ファイル: `~/dotfiles/wezterm/wezterm.lua`（最終更新: 2026-08-07）
+設定ファイル: `~/dotfiles/wezterm/wezterm.lua`（最終更新: 2026-08-18）
 
 ---
 
@@ -20,11 +20,11 @@ WezTerm 起動時に7ペインが自動展開される。比率 = 左2 : 中4 : 
 
 ```
 ┌──────────┬────────────────────┬──────────────────┐
-│⑦Todoist  │① 司令／壁打ち(会社) │② Codex (レビュー) │
-├──────────┤                    │                  │
+│⑦Todoist  │① 司令／壁打ち(会社) │② Codex Sol(個人)  │
+├──────────┤                    │    レビュー        │
 │⑥カレンダー│────────────────────│──────────────────│
-├──────────┤④ Grok Build (xAI)  │③ 実行ワーカー(個人)│
-│⑤AI使用量 │                    │                  │
+├──────────┤④ Jikko (個人Claude) │③ Codex Luna(会社) │
+│⑤agmsg    │   Opus 4.6固定     │    ワーカー        │
 └──────────┴────────────────────┴──────────────────┘
 ```
 
@@ -32,11 +32,13 @@ WezTerm 起動時に7ペインが自動展開される。比率 = 左2 : 中4 : 
 |--------|------|
 | ⑦ | Todoist (`todoist.ps1`) |
 | ⑥ | カレンダー (`calendar.ps1`) |
-| ⑤ | AI使用量ライブ (`ai_usage_pane.ps1`、30秒周期) |
+| ⑤ | agmsg 未ack一覧 (`agmsg watch`、表示のみ) |
 | ① | 司令／壁打ち（会社Claude、`C:\claude`） |
-| ④ | Grok Build（xAI 実行ワーカー） |
-| ② | Codex レビュー（会社アカウント） |
-| ③ | 実行ワーカー（個人Claude、`C:\tamura`） |
+| ④ | Jikko（個人Claude、Opus 4.6固定、フォローアップ） |
+| ② | Codex Sol（個人アカウント、レビュー） |
+| ③ | Codex Luna（会社アカウント、ワーカー） |
+
+※ 2026-08-18: 常駐AIを①会社Claude・②Codex Sol・③Codex Luna・④Jikkoに再編。Antigravity CLI / Grok Build はF9ランチャーから随時起動。
 
 ### Mac
 
@@ -83,15 +85,17 @@ WezTerm 起動時に7ペインが自動展開される。比率 = 左2 : 中4 : 
 |--------|-------------|
 | Claude Code | `CLAUDE_CONFIG_DIR=~/.claude-personal claude`（個人） |
 | Claude Code (会社) | `CLAUDE_CONFIG_DIR=~/.claude claude` |
+| Claude Code (Opus 4.6) | `CLAUDE_CONFIG_DIR=~/.claude-personal claude --model claude-opus-4-6` |
 | Claude Code (Clean) | `CLAUDE_CONFIG_DIR=~/.claude-clean claude --model opus --tools default ...` |
 | Claude Code (会社 Clean) | `CLAUDE_CONFIG_DIR=~/.claude-work-clean claude --model opus --tools default ...` |
 | Gemini CLI | `cd C:\claude; gemini` |
-| Antigravity CLI | `cd C:\claude; agy`（PATHに `%LOCALAPPDATA%\agy\bin` を前置） |
+| Antigravity CLI (会社) | `cd C:\claude; agy`（PATHに `%LOCALAPPDATA%\agy\bin` を前置） |
 | lazygit | `cd ~/dotfiles; lazygit` |
 | Todoist | `todoist.ps1` |
 | 📅 カレンダー | `calendar.ps1` |
 | Codex CLI (会社) | `codex-account.ps1 -Account work`（`CODEX_HOME=~/.codex-work`、`tamura.k@t-sss.co.jp` を起動前検証） |
 | Codex CLI (個人) | `codex-account.ps1 -Account personal`（`CODEX_HOME=~/.codex-personal`、`densontamra@gmail.com` を起動前検証） |
+| 📨 AI委譲キュー | `cd C:\claude; ai-delegate watch` |
 | 🐟 Sakana Fugu | `doppler run --project sakana-ai --config prd -- codex-fugu` |
 | 🐡 Sakana Fugu Ultra | `doppler run --project sakana-ai --config prd -- codex-fugu-ultra` |
 | Grok Build | `cd C:\claude; grok` |
@@ -103,6 +107,7 @@ WezTerm 起動時に7ペインが自動展開される。比率 = 左2 : 中4 : 
 | 🛠 LLM Agent: Gemma 4 E4B | opencode + `lmstudio/google/gemma-4-e4b` |
 | 🛠 LLM Agent: Qwen3.6 35B-A3B | opencode + `lmstudio/qwen/qwen3.6-35b-a3b` |
 | 🛠 LLM Agent: LFM2.5 2.6B | opencode + `lmstudio/lfm2.5-2.6b` |
+| 🪽 Hermes Agent | LFM2.5でLLM Wiki・作業ログを参照（ローカル実行） |
 | yazi | `yazi` |
 | PowerShell | 何もしない（シェルに戻る） |
 
@@ -118,7 +123,13 @@ Mac は Claude 系の CONFIG_DIR 割当と Todoist スクリプトが異なる�
 - 初回または誤アカウント時はデバイスコード認証を開始し、期待するメールアドレスと一致しない限りCodex本体を起動しない
 - 認証状態だけ確認: `& $HOME\dotfiles\wezterm\codex-account.ps1 -Account work -CheckOnly`（個人は `work` を `personal` に変更）
 
----
+### Antigravity CLI のアカウント（Windows・2026-08-17 実機確認）
+
+- **個人／会社の同時併用はできない。** ログイン情報は Windows 資格情報マネージャー（keyring）の1枠のみ。
+  `USERPROFILE` / `HOME` を差し替えて `~/.gemini` 配下の履歴・設定を分離しても、認証は同じアカウントのまま。
+- `agy` にアカウント指定のオプション・サブコマンドはない（`agy --help` / `agy help` で確認）。
+- 運用は**会社Googleアカウントに一本化**。切り替えたい場合は agy 側で明示的にログインし直す（全ペイン・全ランチャーに一括で効く）。
+- 現在のログインアカウントは `~/.gemini/antigravity-cli/cli.log` の `applyAuthResult: email=` 行で確認できる。
 
 ## クイック起動
 
@@ -175,7 +186,8 @@ Very Dark (0.03) 〜 Bright (0.3) の6段階 ＋ No wallpaper。
 右下に Claude（個人/会社のプラン枠使用率、ccusage 近似）と Codex（5h/週）の使用率を表示。
 
 - 表示例: `C 個71% 社-   Cdx 5h50% wk8%`
-- 仕組み: `ai_usage.ps1` が `$TEMP\wez_ai_status.txt` に書き出し、WezTerm はそれを読むだけ（UIをブロックしない）。鮮度は⑤ペインの `ai_usage_pane.ps1`（30秒周期）が保ち、古いときのみバックグラウンドで更新を起動。
+- 仕組み: `ai_usage.ps1` が `$TEMP\wez_ai_status.txt` に書き出し、WezTerm はそれを読むだけ（UIをブロックしない）。
+- ステータスが120秒より古い場合だけ、WezTermが `ai_usage.ps1` をバックグラウンドで起動する（多重起動は60秒間隔で抑止）。
 - Claude 側の重い算出は `ai_usage_refresh.ps1`（ccusage）が detached で実行し `$TEMP\wez_ai_usage.json` にキャッシュ。
 
 ---

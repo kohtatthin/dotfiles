@@ -49,7 +49,10 @@ if is_windows then
     { id = 'claude-work-clean', label = 'Claude Code (会社 Clean)', cmd = 'cd C:\\claude; $env:CLAUDE_CONFIG_DIR = "$HOME\\.claude-work-clean"; claude --model opus --tools default --disable-slash-commands --strict-mcp-config --setting-sources user' },
     { id = 'gemini',     label = 'Gemini CLI',        cmd = 'cd C:\\claude; gemini' },
     -- Antigravity CLI は agy コマンド（%LOCALAPPDATA%\agy\bin）。PATHが古いセッションでも動くよう明示追加
-    { id = 'antigravity', label = 'Antigravity CLI',   cmd = '$env:PATH = "$env:LOCALAPPDATA\\agy\\bin;$env:PATH"; cd C:\\claude; agy' },
+    -- 2026-08-17: 会社アカウント一本化。agy のログイン情報は Windows 資格情報マネージャー（keyring）の
+    --   1枠に保存され、USERPROFILE/HOME を差し替えても同じアカウントで認証される（実機確認）。
+    --   Codex のような個人/会社の同時併用はできないため、エントリは会社用の1本だけにする。
+    { id = 'antigravity', label = 'Antigravity CLI (会社)', cmd = '$env:PATH = "$env:LOCALAPPDATA\\agy\\bin;$env:PATH"; cd C:\\claude; agy' },
     { id = 'lazygit',    label = 'lazygit',           cmd = 'cd $HOME\\dotfiles; lazygit' },
     { id = 'dashboard',  label = 'Todoist',            cmd = '& $HOME\\dotfiles\\wezterm\\todoist.ps1' },
     { id = 'calendar',   label = '📅 カレンダー',        cmd = '& $HOME\\dotfiles\\wezterm\\calendar.ps1' },
@@ -139,20 +142,24 @@ end
 --   ※ 2026-08-14: ②を会社Codex→会社Claude実行ワーカー、③を個人Claude→会社Codexレビューへ入れ替え。
 --                 上段=Claude Code 2枚（①司令・②実行）、下段=④Grok・③Codex。個人Claudeは常駐から除外。
 --   ※ 2026-08-16: Mac ③を Shell → 会社Claude（~/.claude-work）に差し替え。実行・検証Shellは F9 ランチャーへ。
+--   ※ 2026-08-17: ②のClaude Sonnet実行ワーカーを廃止。②=会社Codex（レビュー）、③=Antigravity CLI。
+--   ※ 2026-08-18: 4AI体制再編。②=Codex Sol(個人/レビュー)、③=Codex Luna(会社/ワーカー)、
+--                 ④=Claude個人"Jikko"(Opus 4.6固定/フォローアップ)。Antigravity/GrokはF9ランチャーで随時起動。
 -- ===================================================================
 --
 -- Windows（左カラムだけ3分割。図中の丸数字が上記の番号）:
 -- ┌──────────┬────────────────────┬──────────────────┐
--- │⑦Todoist  │① 司令／壁打ち(会社) │② 実行ワーカー(会社)│
--- ├──────────┤                    │                  │
+-- │⑦Todoist  │① 司令／壁打ち(会社) │② Codex Sol(個人)  │
+-- ├──────────┤                    │    レビュー        │
 -- │⑥カレンダー│────────────────────│──────────────────│
--- ├──────────┤④ Grok Build (xAI)  │③ Codex (レビュー) │
--- │⑤agmsg    │                    │                  │
+-- ├──────────┤④ Jikko (個人Claude) │③ Codex Luna(会社) │
+-- │⑤agmsg    │   Opus 4.6固定     │    ワーカー        │
 -- └──────────┴────────────────────┴──────────────────┘
 --   左 = ⑦Todoist / ⑥カレンダー / ⑤agmsg未ack一覧（細い列・3分割）
---   中 = 上=①会社Claude司令/壁打ち, 下=④Grok Build(xAI)
---   右 = 上 ②会社Claude実行ワーカー / 下 ③会社Codexレビュー
---   上段が Claude Code 2枚（①司令・②実行）、下段が Grok・Codex の横並び。
+--   中 = 上=①会社Claude司令/壁打ち, 下=④Jikko(個人Claude, Opus 4.6固定, フォローアップ枠)
+--   右 = 上=②Codex Sol(個人/レビュー), 下=③Codex Luna(会社/ワーカー)
+--   常駐AIは ①会社Claude・②Codex Sol・③Codex Luna・④Jikko の4枚。
+--   Antigravity CLI / Grok 4.5 はトークン温存のため常駐せず、③④からF9ランチャーで随時起動。
 --   ※ yazi / lazygit は常駐から外し F9 ランチャーで随時起動
 -- Mac（個人アカウント中心。③だけ会社Claudeを常駐。実行・検証Shellは F9）:
 -- ┌──────────┬────────────────────┬──────────────────┐
@@ -217,15 +224,14 @@ wezterm.on('gui-startup', function(cmd)
       -- AGMSG_AGENT は agmsg v2 の identity。①②は project も type も同一のため、
       -- 推論ではなくここで固定する（旧agmsgのidentity衝突を構造的に回避）。
       middle_pane:send_text('cd C:\\claude; $env:CLAUDE_CONFIG_DIR = "$HOME\\.claude"; $env:AGMSG_AGENT = "commander"; claude --name commander\r\n')
-      -- ④ 中下: Grok Build（xAI 実行ワーカー）。cwd=C:\claude で AGENTS.md/MCP を継承。grok は ~/.grok/bin（User PATH 済）。
-      -- Grok Build にはフック機構がないため、受信は手動 `agmsg inbox` のみ（2026-08-14 実機確認）。
-      middle_bottom:send_text('cd C:\\claude; $env:AGMSG_AGENT = "grok"; grok\r\n')
-      -- ② 右上: 実行ワーカー（会社Claude・Sonnet固定）。①司令と同一アカウント＝Team枠のためレート制限は①と共有。
-      -- セッション内で /model により変更可能（起動時の既定がSonnetになるだけ）。
-      -- 2026-08-14: 個人Claudeを常駐から外し、①②を会社Claude 2枚（司令／実行）の横並びへ変更。
-      right_pane:send_text('cd C:\\claude; $env:CLAUDE_CONFIG_DIR = "$HOME\\.claude"; $env:AGMSG_AGENT = "worker"; claude --model sonnet --name worker\r\n')
-      -- ③ 右下: レビュー専用（会社Codex）。デスクトップ既定(~/.codex・個人)とは認証領域を分離し、起動前にID検証。
-      right_bottom:send_text('cd C:\\claude; $env:AGMSG_AGENT = "codex"; & "$HOME\\dotfiles\\wezterm\\codex-account.ps1" -Account work\r\n')
+      -- ④ 中下: Jikko（個人Claude, Opus 4.6固定）。フォローアップ・パーソナル枠。
+      -- 性格は ~/.claude-personal/CLAUDE.md で定義（実行増幅器スタイル）。
+      -- Antigravity / Grok はトークン温存のため常駐せず、F9ランチャーで随時起動。
+      middle_bottom:send_text('cd C:\\claude; $env:CLAUDE_CONFIG_DIR = "$HOME\\.claude-personal"; $env:AGMSG_AGENT = "jikko"; claude --model claude-opus-4-6 --name jikko\r\n')
+      -- ② 右上: Codex Sol（個人アカウント、レビュー担当）。
+      right_pane:send_text('cd C:\\claude; $env:AGMSG_AGENT = "codex-sol"; & "$HOME\\dotfiles\\wezterm\\codex-account.ps1" -Account personal\r\n')
+      -- ③ 右下: Codex Luna（会社アカウント、ワーカー担当）。
+      right_bottom:send_text('cd C:\\claude; $env:AGMSG_AGENT = "codex-luna"; & "$HOME\\dotfiles\\wezterm\\codex-account.ps1" -Account work\r\n')
     else
       -- Mac: ①個人Claudeで考える → ④Grokで作る → ③会社Claudeで動かす → ②Codexでレビュー
       -- send_text は Enter を \r で送る（\n だけだとプロンプトに文字が残って実行されないことがある）
