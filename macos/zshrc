@@ -1,0 +1,14 @@
+# macOS 共通の zsh 設定。
+# API キーなどの秘密情報は ~/.zshrc.local に置く。
+
+export PATH="$HOME/.local/bin:$PATH"
+export PATH="$HOME/.npm-global/bin:$PATH"
+
+# マシン固有・非公開の設定を読み込む。
+[[ -f "$HOME/.zshrc.local" ]] && source "$HOME/.zshrc.local"
+
+# >>> grok installer >>>
+export PATH="$HOME/.grok/bin:$PATH"
+fpath=("$HOME/.grok/completions/zsh" $fpath)
+autoload -Uz compinit && compinit -C
+# <<< grok installer <<<

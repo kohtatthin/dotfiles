@@ -1,0 +1,27 @@
+# macOS 共通の Git 設定。
+# user.name / user.email は ~/.gitconfig.local に置く。
+
+[include]
+	path = ~/.gitconfig.local
+
+[core]
+	excludesfile = ~/.gitignore_global
+
+[difftool "sourcetree"]
+	cmd = opendiff "$LOCAL" "$REMOTE"
+	path =
+
+[mergetool "sourcetree"]
+	cmd = "$HOME/Applications/Sourcetree.app/Contents/Resources/opendiff-w.sh" "$LOCAL" "$REMOTE" -ancestor "$BASE" -merge "$MERGED"
+	trustExitCode = true
+
+[commit]
+	template = ~/.stCommitMsg
+
+[credential "https://github.com"]
+	helper =
+	helper = !/opt/homebrew/bin/gh auth git-credential
+
+[credential "https://gist.github.com"]
+	helper =
+	helper = !/opt/homebrew/bin/gh auth git-credential
