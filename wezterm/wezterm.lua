@@ -15,6 +15,11 @@ local config = {}
 -- OS判定
 local is_windows = wezterm.target_triple:find('windows') ~= nil
 
+-- Herdr はAIプロセスの実体を保持し、複数のWezTermウィンドウから同じ
+-- defaultセッションへ接続する。PATHが古いWezTermでも動くよう実体を明示する。
+local herdr_exe = wezterm.home_dir .. '\\AppData\\Local\\Programs\\Herdr\\bin\\herdr.exe'
+local herdr_bootstrap = wezterm.home_dir .. '\\dotfiles\\wezterm\\herdr-bootstrap.ps1'
+
 -- ローカルLLM(LM Studio)の起動コマンド生成。lms は %USERPROFILE%\.lmstudio\bin にあり、
 -- PATHが古いセッションでも動くよう明示追加する。model は `lms ls --json` の modelKey。
 local function lms_chat(model)
@@ -39,8 +44,10 @@ end
 local launcher_apps
 if is_windows then
   launcher_apps = {
+    -- ★ F9ランチャーは現在ペインへ直接起動する（Herdr管理外）。
+    --   Herdr Cockpitには表示されない。常駐AIの差し替えではなく一時利用向け。
     -- Claude系はアカウント(CLAUDE_CONFIG_DIR)と作業ディレクトリを必ずセットで指定する。
-    -- 個人=.claude-personal↔C:\claude / 会社=.claude↔C:\claude（2026-07-30: 個人の作業ディレクトリを C:\tamura から C:\claude へ変更）。
+    -- 個人=.claude-personal↔C:\claude / 会社=.claude↔C:\claude。
     { id = 'claude',     label = 'Claude Code',       cmd = 'cd C:\\claude; $env:CLAUDE_CONFIG_DIR = "$HOME\\.claude-personal"; claude' },
     { id = 'claude-work', label = 'Claude Code (会社)', cmd = 'cd C:\\claude; $env:CLAUDE_CONFIG_DIR = "$HOME\\.claude"; claude' },
     -- 旧世代モデルを明示指定して起動する枠（既定の opus は最新世代に追随するため別枠にする）。
@@ -62,6 +69,7 @@ if is_windows then
     { id = 'codex-personal', label = 'Codex CLI (個人)', cmd = 'cd C:\\claude; & "$HOME\\dotfiles\\wezterm\\codex-account.ps1" -Account personal' },
     -- AI委譲キューはペイン注入ではなく、必要時だけ会社Claudeを非対話起動する。WezTerm常駐には依存しない。
     { id = 'delegate-queue', label = '📨 AI委譲キュー', cmd = 'cd C:\\claude; ai-delegate watch' },
+    { id = 'agmsg-watch', label = '📨 agmsg 未ack一覧', cmd = 'cd C:\\claude; agmsg watch' },
     { id = 'fugu',       label = '🐟 Sakana Fugu',      cmd = '$env:CODEX_HOME = "$HOME\\.codex-personal"; cd C:\\claude; doppler run --project sakana-ai --config prd -- codex-fugu' },
     { id = 'fugu-ultra', label = '🐡 Sakana Fugu Ultra', cmd = '$env:CODEX_HOME = "$HOME\\.codex-personal"; cd C:\\claude; doppler run --project sakana-ai --config prd -- codex-fugu-ultra' },
     { id = 'grok',       label = 'Grok Build',         cmd = 'cd C:\\claude; grok' },
@@ -138,14 +146,18 @@ end
 --
 --   ①〜⑦の具体的な役割はOS別の図を参照（位置番号は両OS共通）
 --   ※「左上／右下」等の位置呼びは廃止。必ず番号（①〜⑦）で呼ぶこと。
---   ※ 2026-06-22: ④を会社Claudeワーカー(cc-w)から Grok Build に置換。agmsg 監視デーモン撤去（手動 send.sh のみ残置）。
---   ※ 2026-08-14: ②を会社Codex→会社Claude実行ワーカー、③を個人Claude→会社Codexレビューへ入れ替え。
---                 上段=Claude Code 2枚（①司令・②実行）、下段=④Grok・③Codex。個人Claudeは常駐から除外。
---   ※ 2026-08-16: Mac ③を Shell → 会社Claude（~/.claude-work）に差し替え。実行・検証Shellは F9 ランチャーへ。
---   ※ 2026-08-17: ②のClaude Sonnet実行ワーカーを廃止。②=会社Codex（レビュー）、③=Antigravity CLI。
---   ※ 2026-08-18: 4AI体制再編。②=Codex Sol(個人/レビュー)、③=Codex Luna(会社/ワーカー)、
---                 ④=Claude個人"Jikko"(Opus 4.6固定/フォローアップ)。Antigravity/GrokはF9ランチャーで随時起動。
--- ===================================================================
+--
+-- ===== Windows: Herdr管理体制（2026-08-20〜） =====
+--   WezTerm起動 → 別ウィンドウで herdr-bootstrap.ps1 → HerdrがAIプロセスを所有。
+--   7ペインのウィンドウは従来どおり構築する（⑤=Herdr Cockpit, ⑥=カレンダー, ⑦=Todoist,
+--   ①〜④=AIを各ペインで直接起動）。※①〜④はHerdr管理下のAIとは別プロセスなので、
+--     同じ役割のAIが二重に立ち上がる。整理する場合はペイン側をHerdrへのattachに変えること。
+--   AIの実体は Herdr の3ワークスペースにある:
+--     Core Agents (w1): ①Commander(会社Claude), ②Codex Sol(個人), ③Codex Luna(会社), ④Jikko(個人Claude, Opus 4.6)
+--     Extra Agents (w2): Grok, Antigravity, Claude Extra(会社), Local LLM Extra
+--     Local LLM   (w3): LFM 2.5 (opencode)
+--   F9ランチャーはHerdr管理外で現在ペインにAIを直接起動する（コックピット非表示）。
+-- =================================================================
 --
 -- Windows（左カラムだけ3分割。図中の丸数字が上記の番号）:
 -- ┌──────────┬────────────────────┬──────────────────┐
@@ -155,12 +167,10 @@ end
 -- ├──────────┤④ Jikko (個人Claude) │③ Codex Luna(会社) │
 -- │⑤agmsg    │   Opus 4.6固定     │    ワーカー        │
 -- └──────────┴────────────────────┴──────────────────┘
---   左 = ⑦Todoist / ⑥カレンダー / ⑤agmsg未ack一覧（細い列・3分割）
---   中 = 上=①会社Claude司令/壁打ち, 下=④Jikko(個人Claude, Opus 4.6固定, フォローアップ枠)
+--   左 = ⑦Todoist / ⑥カレンダー / ⑤Herdr Cockpit（細い列・3分割）
+--   中 = 上=①会社Claude司令/壁打ち, 下=④Jikko(個人Claude, Opus 4.6固定)
 --   右 = 上=②Codex Sol(個人/レビュー), 下=③Codex Luna(会社/ワーカー)
---   常駐AIは ①会社Claude・②Codex Sol・③Codex Luna・④Jikko の4枚。
---   Antigravity CLI / Grok 4.5 はトークン温存のため常駐せず、③④からF9ランチャーで随時起動。
---   ※ yazi / lazygit は常駐から外し F9 ランチャーで随時起動
+--   AIの実体はHerdr管理下（上記ワークスペース参照）。WezTermペインは情報表示用。
 -- Mac（個人アカウント中心。③だけ会社Claudeを常駐。実行・検証Shellは F9）:
 -- ┌──────────┬────────────────────┬──────────────────┐
 -- │⑦Todoist  │① Claude 司令／壁打ち│② Codex (レビュー) │
@@ -171,6 +181,17 @@ end
 -- └──────────┴────────────────────┴──────────────────┘
 --   ※ Gemini / yazi / Shell は常駐から外し F9 ランチャーで随時起動
 wezterm.on('gui-startup', function(cmd)
+  -- Herdrブートストラップ(-ConfigureOnly)をバックグラウンドで実行。
+  -- Cockpit UI は左下ペインで herdr-status.ps1 経由で表示する。
+  if is_windows and not cmd then
+    local log = wezterm.home_dir .. '\\AppData\\Local\\herdr\\bootstrap.log'
+    wezterm.background_child_process {
+      'powershell.exe', '-ExecutionPolicy', 'Bypass',
+      '-Command',
+      '& "' .. herdr_bootstrap .. '" -ConfigureOnly *> "' .. log .. '"',
+    }
+  end
+
   local tab, pane, window = mux.spawn_window(cmd or {})
   window:gui_window():maximize()
 
@@ -217,9 +238,8 @@ wezterm.on('gui-startup', function(cmd)
       pane:send_text('& $HOME\\dotfiles\\wezterm\\todoist.ps1\r\n')
       -- ⑥ 左中: カレンダー（calendar.ps1。暫定=月表示 → 後日 Google Calendar 連携へ中身を差し替え）
       left_mid:send_text('& $HOME\\dotfiles\\wezterm\\calendar.ps1\r\n')
-      -- ⑤ 左下: agmsg v2 の未ack一覧を常時表示（表示のみ・ペインへの注入はしない）。
-      -- 2026-08-14: ai-delegate watch から差し替え。委譲キューは F9 ランチャー「📨 AI委譲キュー」で随時起動。
-      left_bottom:send_text('cd C:\\claude; agmsg watch\r\n')
+      -- ⑤ 左下: ブートストラップ完了を待ってからHerdr本体(メニューUI)を起動。
+      left_bottom:send_text('do { Start-Sleep -Milliseconds 500 } until (& "' .. herdr_exe .. '" status server 2>$null; $?); & "' .. herdr_exe .. '"\r\n')
       -- ① 中上: 司令／壁打ち（会社Claude）。CLAUDE_CONFIG_DIR=.claude を明示。
       -- AGMSG_AGENT は agmsg v2 の identity。①②は project も type も同一のため、
       -- 推論ではなくここで固定する（旧agmsgのidentity衝突を構造的に回避）。
@@ -709,6 +729,12 @@ config.keys = {
   { key = 'w', mods = 'CTRL|SHIFT', action = act.CloseCurrentPane { confirm = true } },
   -- Pane zoom: 現在ペインを一時最大化⇔もう一度で復帰 (Ctrl+Shift+Z)
   { key = 'z', mods = 'CTRL|SHIFT', action = act.TogglePaneZoomState },
+  -- Herdr AI Hub: 同じdefaultセッションを専用WezTermウィンドウで開く。
+  -- サーバー側のペイン実体は共有されるため、既存7ペインと別窓の双方から確認できる。
+  { key = 'h', mods = 'CTRL|SHIFT', action = act.SpawnCommandInNewWindow {
+    args = { herdr_exe },
+    cwd = 'C:\\claude',
+  } },
   -- Pane repair: ローカルLLM(lms chat等)終了後にConPTYの表示がズレて
   -- 上下ペインが繋がって見える現象向けの復旧ショートカット。
   -- ズームON→OFFを瞬時に往復させ、ペイン境界の再計算・再描画を強制する (Ctrl+Shift+R)
