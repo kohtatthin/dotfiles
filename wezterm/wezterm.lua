@@ -22,9 +22,31 @@ if is_windows then
   herdr_exe = wezterm.home_dir .. '\\AppData\\Local\\Programs\\Herdr\\bin\\herdr.exe'
   herdr_bootstrap = wezterm.home_dir .. '\\dotfiles\\wezterm\\herdr-bootstrap.ps1'
 else
+  -- macOS: Dock/Finder から起動した WezTerm の PATH は /usr/bin:/bin:/usr/sbin:/sbin だけで、
+  -- Homebrew の bin が入らない。gui-startup から呼ぶ子プロセスが `herdr` を解決できず
+  -- ブートストラップが無言で落ちるため、実体パスを探して使う（2026-08-30）。
   herdr_exe = 'herdr'
+  for _, candidate in ipairs {
+    '/opt/homebrew/bin/herdr',                 -- Apple Silicon の Homebrew
+    '/usr/local/bin/herdr',                    -- Intel の Homebrew
+    wezterm.home_dir .. '/.local/bin/herdr',
+  } do
+    local f = io.open(candidate, 'r')
+    if f then
+      f:close()
+      herdr_exe = candidate
+      break
+    end
+  end
   herdr_bootstrap = wezterm.home_dir .. '/dotfiles/wezterm/herdr-bootstrap.sh'
 end
+
+-- macOS で WezTerm が直接起動する子プロセスに渡す PATH。
+-- 非対話ログインシェルは ~/.zshrc を読まないため codex(.npm-global) や grok(.grok) が落ちる。
+-- 対話 zsh と同じ並びをここで明示する。
+local mac_path_prefix =
+  'export PATH="$HOME/.local/bin:$HOME/.npm-global/bin:$HOME/.grok/bin:'
+  .. '/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:$PATH"; '
 
 -- ローカルLLM(LM Studio)の起動コマンド生成。lms は %USERPROFILE%\.lmstudio\bin にあり、
 -- PATHが古いセッションでも動くよう明示追加する。model は `lms ls --json` の modelKey。
@@ -185,8 +207,13 @@ end
 -- ├──────────┤④ Grok Build (実装) │③ Claude Code (会社)│
 -- │⑤Herdr    │                    │                  │
 -- └──────────┴────────────────────┴──────────────────┘
---   AIの実体はHerdr管理下（Core Agentsワークスペース参照）。WezTermペインは情報表示用。
---   ※ Gemini / yazi / lazygit / Shell は常駐から外し F9 ランチャーで随時起動
+--   AIの実体はHerdr管理下。WezTermペインは情報表示用。
+--   Herdrの2ワークスペース（herdr-bootstrap.sh が構築。Ctrl+Shift+H で別窓表示）:
+--     Core Agents  : Claude Personal - Commander / Codex - Review / Grok Build / Claude Work
+--     Extra Agents : Antigravity CLI / Gemini CLI / Claude Extra
+--   ※ Windows の Local LLM ワークスペースは LM Studio / opencode 未導入のため作らない。
+--   ※ Extra を常駐させたくないときは herdr-bootstrap.sh に --skip-extra を渡す。
+--   ※ yazi / lazygit / Shell は常駐から外し F9 ランチャーで随時起動
 wezterm.on('gui-startup', function(cmd)
   -- Herdrブートストラップ(-ConfigureOnly)をバックグラウンドで実行。
   -- Cockpit UI は左下ペインで herdr-status.ps1 経由で表示する。
@@ -199,9 +226,11 @@ wezterm.on('gui-startup', function(cmd)
         '& "' .. herdr_bootstrap .. '" -ConfigureOnly *> "' .. log .. '"',
       }
     else
+      -- 出力はログへ落とす（Windows の *> と同じ）。無言で落ちると原因を追えない。
       local log = wezterm.home_dir .. '/.config/herdr/bootstrap.log'
       wezterm.background_child_process {
-        'bash', herdr_bootstrap, '--configure-only',
+        '/bin/bash', '-c',
+        mac_path_prefix .. 'exec "' .. herdr_bootstrap .. '" --configure-only >"' .. log .. '" 2>&1',
       }
     end
   end
@@ -274,7 +303,8 @@ wezterm.on('gui-startup', function(cmd)
       -- ⑥ 左中: カレンダー
       left_mid:send_text('cal\r')
       -- ⑤ 左下: Herdr Cockpit（ブートストラップ完了を待ってからステータス表示を起動）
-      left_bottom:send_text('while ! herdr status server 2>/dev/null | grep -q running; do sleep 0.5; done; bash ~/dotfiles/wezterm/herdr-status.sh\r')
+      -- 待ちは最大60秒。上がらなくても状態表示は出す（無限ループで沈黙させない）。
+      left_bottom:send_text('for _ in $(seq 1 120); do "' .. herdr_exe .. '" status server 2>/dev/null | grep -q running && break; sleep 0.5; done; bash ~/dotfiles/wezterm/herdr-status.sh\r')
       -- ① 中上: 個人Claudeの司令／壁打ち
       middle_pane:send_text('claude\r')
       -- ④ 中下: Grok Buildの実装ワーカー
@@ -746,7 +776,8 @@ config.keys = {
   -- Herdr AI Hub: 同じdefaultセッションを専用WezTermウィンドウで開く。
   -- サーバー側のペイン実体は共有されるため、既存7ペインと別窓の双方から確認できる。
   { key = 'h', mods = 'CTRL|SHIFT', action = act.SpawnCommandInNewWindow {
-    args = is_windows and { herdr_exe } or { '/bin/bash', '-c', 'herdr' },
+    args = is_windows and { herdr_exe }
+      or { '/bin/bash', '-c', mac_path_prefix .. 'exec "' .. herdr_exe .. '"' },
     cwd = is_windows and 'C:\\claude' or (wezterm.home_dir .. '/claude'),
   } },
   -- Pane repair: ローカルLLM(lms chat等)終了後にConPTYの表示がズレて

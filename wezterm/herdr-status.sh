@@ -3,6 +3,26 @@
 # Windows の herdr-status.ps1 と同等。3秒ごとにエージェント状態を表示する。
 # 用法: herdr-status.sh [--once]
 
+# ---------- PATH の再構成 ----------
+# Dock/Finder から起動した WezTerm の子プロセスは PATH が /usr/bin:/bin:/usr/sbin:/sbin だけになる。
+# さらに非対話ログインシェルは ~/.zshrc を読まないため codex(.npm-global) や grok(.grok) も落ちる。
+# 対話 zsh と同じ並びをここで明示して、herdr も各AI CLI も必ず解決できるようにする（2026-08-30）。
+for _d in "$HOME/.local/bin" "$HOME/.npm-global/bin" "$HOME/.grok/bin" \
+          "$HOME/.bun/bin" "$HOME/.cargo/bin" \
+          /opt/homebrew/bin /opt/homebrew/sbin /usr/local/bin; do
+  case ":$PATH:" in
+    *":$_d:"*) ;;
+    *) [ -d "$_d" ] && PATH="$_d:$PATH" ;;
+  esac
+done
+export PATH
+unset _d
+
+if ! command -v herdr >/dev/null 2>&1; then
+  echo "Error: herdr が PATH 上に見つからない (PATH=$PATH)" >&2
+  exit 1
+fi
+
 ONCE=false
 for arg in "$@"; do
   case "$arg" in --once) ONCE=true ;; esac
@@ -48,7 +68,8 @@ while true; do
         continue
       fi
 
-      echo "$AGENT_JSON" | jq -r --arg wid "$ws_id" '.result.agents[] | select(.workspace_id==$wid) | "\(.pane_id)\t\(.agent_status)\t\(.name // .agent)"' 2>/dev/null | while IFS=$'\t' read -r pane_id status agent_name; do
+      # 表示順は pane_id 順（Windows 版の Sort-Object pane_id と合わせる）
+      echo "$AGENT_JSON" | jq -r --arg wid "$ws_id" '[.result.agents[] | select(.workspace_id==$wid)] | sort_by(.pane_id) | .[] | "\(.pane_id)\t\(.agent_status)\t\(.name // .agent)"' 2>/dev/null | while IFS=$'\t' read -r pane_id status agent_name; do
         pane_label=$(echo "$PANE_JSON" | jq -r --arg pid "$pane_id" '.result.panes[] | select(.pane_id==$pid) | .label // empty' 2>/dev/null)
         display_name="${pane_label:-$agent_name}"
         color=$(color_for_status "$status")
