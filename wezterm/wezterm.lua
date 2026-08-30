@@ -209,9 +209,9 @@ end
 -- └────────┴──────────────────────────────────────────┘
 --   WezTerm起動 → herdr-bootstrap.sh がサーバー・ワークスペース・AIを整備 →
 --   唯一のペインで herdr 本体(TUI)がフルウィンドウ起動。7ペイン分割はしない。
---   Herdrの2ワークスペース（herdr-bootstrap.sh が構築）:
---     Core Agents  : Claude Personal - Commander / Codex - Review / Grok Build / Claude Work
---     Extra Agents : Antigravity CLI / Gemini CLI / Claude Extra
+--   Herdrの2ワークスペース（herdr-bootstrap.sh が構築。2026-08-31 再編）:
+--     Core Agents  : Claude Personal - Commander / Codex - Review / Grok Build / Claude Work / Antigravity
+--     Extra Agents : Antigravity / Grok / Claude Work / Codex の各 Extra（Coreと同役割の予備枠）
 --   ※ Windows の Local LLM ワークスペースは LM Studio / opencode 未導入のため作らない。
 --   ※ Extra を常駐させたくないときは herdr-bootstrap.sh に --skip-extra を渡す。
 --   ※ Todoist / カレンダー / yazi / lazygit / Shell は F9 ランチャーで随時起動

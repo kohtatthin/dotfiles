@@ -145,8 +145,25 @@ fill_panes() {
   done
 }
 
-# Core Agents: 2x2 グリッド
+# Core Agents: 2x2 ＋ 右下をもう1段割って Antigravity（計5ペイン）
 setup_core_panes() {
+  local ws_id="$1" p1 p2 p4
+  if [ "$(pane_count "$ws_id")" -eq 1 ]; then
+    p1=$(sorted_pane_ids "$ws_id" | sed -n 1p)
+    p2=$(herdr pane split --pane "$p1" --direction right --no-focus \
+      | jq -r '.result.pane.pane_id')
+    herdr pane split --pane "$p1" --direction down --no-focus >/dev/null
+    p4=$(herdr pane split --pane "$p2" --direction down --no-focus \
+      | jq -r '.result.pane.pane_id')
+    herdr pane split --pane "$p4" --direction down --no-focus >/dev/null
+  fi
+  fill_panes "$ws_id" 5
+  apply_pane_labels "$ws_id" \
+    "Claude Personal - Commander" "Codex - Review" "Grok Build" "Claude Work" "Antigravity"
+}
+
+# Extra Agents: 2x2 の予備枠（Core と同役割の2本目を置く）
+setup_extra_panes() {
   local ws_id="$1" p1 p2
   if [ "$(pane_count "$ws_id")" -eq 1 ]; then
     p1=$(sorted_pane_ids "$ws_id" | sed -n 1p)
@@ -157,21 +174,7 @@ setup_core_panes() {
   fi
   fill_panes "$ws_id" 4
   apply_pane_labels "$ws_id" \
-    "Claude Personal - Commander" "Codex - Review" "Grok Build" "Claude Work"
-}
-
-# Extra Agents: 左1 / 右上 / 右下 の3ペイン
-# Mac には LM Studio / opencode が無いため、Windows の Local LLM 枠は作らない。
-setup_extra_panes() {
-  local ws_id="$1" p1 p2
-  if [ "$(pane_count "$ws_id")" -eq 1 ]; then
-    p1=$(sorted_pane_ids "$ws_id" | sed -n 1p)
-    p2=$(herdr pane split --pane "$p1" --direction right --no-focus \
-      | jq -r '.result.pane.pane_id')
-    herdr pane split --pane "$p2" --direction down --no-focus >/dev/null
-  fi
-  fill_panes "$ws_id" 3
-  apply_pane_labels "$ws_id" "Antigravity CLI" "Gemini CLI" "Claude Extra"
+    "Antigravity - Extra" "Grok - Extra" "Claude Work - Extra" "Codex - Extra"
 }
 
 # ---------- メイン ----------
@@ -186,7 +189,7 @@ setup_extra_panes "$EXTRA_WS"
 
 LIVE_PANE_IDS=$(live_agent_pane_ids)
 
-# --- Core Agents（wezterm.lua の Mac レイアウトと対応）---
+# --- Core Agents ---
 # ① Claude Personal - Commander
 start_agent_if_missing "$(pane_id_by_label "$CORE_WS" 'Claude Personal - Commander')" \
   "Claude Personal - Commander" \
@@ -207,19 +210,28 @@ start_agent_if_missing "$(pane_id_by_label "$CORE_WS" 'Claude Work')" \
   "Claude Work" \
   bash -c 'export CLAUDE_CONFIG_DIR=~/.claude-work; cd ~/claude && claude --model opus'
 
-# --- Extra Agents（--skip-extra で丸ごと省略できる）---
+# ⑤ Antigravity
+start_agent_if_missing "$(pane_id_by_label "$CORE_WS" 'Antigravity')" \
+  "Antigravity" \
+  bash -c 'cd ~/claude && agy'
+
+# --- Extra Agents（Core と同役割の予備枠。--skip-extra で丸ごと省略できる）---
 if [ "$SKIP_EXTRA" = false ]; then
-  start_agent_if_missing "$(pane_id_by_label "$EXTRA_WS" 'Antigravity CLI')" \
-    "Antigravity CLI" \
+  start_agent_if_missing "$(pane_id_by_label "$EXTRA_WS" 'Antigravity - Extra')" \
+    "Antigravity - Extra" \
     bash -c 'cd ~/claude && agy'
 
-  start_agent_if_missing "$(pane_id_by_label "$EXTRA_WS" 'Gemini CLI')" \
-    "Gemini CLI" \
-    bash -c 'cd ~/claude && gemini'
+  start_agent_if_missing "$(pane_id_by_label "$EXTRA_WS" 'Grok - Extra')" \
+    "Grok - Extra" \
+    bash -c 'cd ~/claude && grok'
 
-  start_agent_if_missing "$(pane_id_by_label "$EXTRA_WS" 'Claude Extra')" \
-    "Claude Extra" \
-    bash -c 'unset CLAUDE_CONFIG_DIR; cd ~/claude && claude'
+  start_agent_if_missing "$(pane_id_by_label "$EXTRA_WS" 'Claude Work - Extra')" \
+    "Claude Work - Extra" \
+    bash -c 'export CLAUDE_CONFIG_DIR=~/.claude-work; cd ~/claude && claude --model opus'
+
+  start_agent_if_missing "$(pane_id_by_label "$EXTRA_WS" 'Codex - Extra')" \
+    "Codex - Extra" \
+    bash -c 'cd ~/claude && codex'
 fi
 
 herdr workspace focus "$CORE_WS" >/dev/null 2>&1 || true
