@@ -205,13 +205,14 @@ end
 -- ├──────────┤                    │                  │
 -- │⑥カレンダー│────────────────────│──────────────────│
 -- ├──────────┤④ Grok Build (実装) │③ Claude Code (会社)│
--- │⑤Herdr    │                    │                  │
+-- │⑤Herdr切替│                    │                  │
 -- └──────────┴────────────────────┴──────────────────┘
 --   AIの実体はHerdr管理下。WezTermペインは情報表示用。
 --   Herdrの2ワークスペース（herdr-bootstrap.sh が構築。Ctrl+Shift+H で別窓表示）:
 --     Core Agents  : Claude Personal - Commander / Codex - Review / Grok Build / Claude Work
 --     Extra Agents : Antigravity CLI / Gemini CLI / Claude Extra
 --   ※ Windows の Local LLM ワークスペースは LM Studio / opencode 未導入のため作らない。
+--   ※ ⑤ペインは切替メニュー。1/2/3 でワークスペース移動、フォーカス中は * 表示。
 --   ※ Extra を常駐させたくないときは herdr-bootstrap.sh に --skip-extra を渡す。
 --   ※ yazi / lazygit / Shell は常駐から外し F9 ランチャーで随時起動
 wezterm.on('gui-startup', function(cmd)
@@ -300,9 +301,10 @@ wezterm.on('gui-startup', function(cmd)
       -- send_text は Enter を \r で送る（\n だけだとプロンプトに文字が残って実行されないことがある）
       -- ⑦ 左上: Todoist
       pane:send_text('bash ~/dotfiles/wezterm/todoist.sh\r')
-      -- ⑥ 左中: カレンダー
-      left_mid:send_text('cal\r')
-      -- ⑤ 左下: Herdr Cockpit（ブートストラップ完了を待ってからステータス表示を起動）
+      -- ⑥ 左中: カレンダー（Windows の calendar.ps1 と同じ Google Calendar アジェンダ）
+      left_mid:send_text('bash ~/dotfiles/wezterm/calendar.sh\r')
+      -- ⑤ 左下: Herdr Cockpit 兼ワークスペース切替メニュー。
+      -- 数字キーで herdr workspace focus を切り替える（Ctrl+Shift+1/2/3 でも同じ）。
       -- 待ちは最大60秒。上がらなくても状態表示は出す（無限ループで沈黙させない）。
       left_bottom:send_text('for _ in $(seq 1 120); do "' .. herdr_exe .. '" status server 2>/dev/null | grep -q running && break; sleep 0.5; done; bash ~/dotfiles/wezterm/herdr-status.sh\r')
       -- ① 中上: 個人Claudeの司令／壁打ち
@@ -474,7 +476,9 @@ if is_windows then
   wallpaper_file = wezterm.home_dir .. '/dotfiles/wezterm/wallpapers/workshop-brutalist-4k.png'
   wallpaper_dir = wezterm.home_dir .. '\\dotfiles\\wezterm\\wallpapers\\'
 else
-  wallpaper_file = wezterm.home_dir .. '/dotfiles/wezterm/wallpaper.jpg'
+  -- 既定の壁紙は Windows と同じもの（wallpapers/ 直下の共有ファイルを参照する）。
+  -- 差し替え候補の一覧（Cmd+Shift+I）は従来どおり wallpapers/mac/ を見る。
+  wallpaper_file = wezterm.home_dir .. '/dotfiles/wezterm/wallpapers/workshop-brutalist-4k.png'
   wallpaper_dir = wezterm.home_dir .. '/dotfiles/wezterm/wallpapers/mac/'
 end
 
@@ -531,7 +535,8 @@ else
     config.background = {
       {
         source = { File = saved_wp or wallpaper_file },
-        hsb = { brightness = 0.1 },
+        -- 元画像を暗色に調整済みなので、質感が残る程度の明るさにする（Windows と同値）。
+        hsb = { brightness = 0.45 },
         opacity = 0.9,
         horizontal_align = 'Center',
         vertical_align = 'Middle',
@@ -641,9 +646,16 @@ local function resolve_wallpaper(profile)
   elseif profile.wallpaper and profile.wallpaper ~= false then
     if is_windows then
       return wezterm.home_dir .. '\\dotfiles\\wezterm\\wallpapers\\' .. profile.wallpaper
-    else
-      return wezterm.home_dir .. '/dotfiles/wezterm/wallpapers/mac/' .. profile.wallpaper
     end
+    -- Mac は wallpapers/mac/ を優先し、無ければ Windows と共有の wallpapers/ を見る。
+    -- （workshop-brutalist-4k.png のように mac/ に複製していないファイルがあるため）
+    local mac_path = wezterm.home_dir .. '/dotfiles/wezterm/wallpapers/mac/' .. profile.wallpaper
+    local f = io.open(mac_path, 'r')
+    if f then
+      f:close()
+      return mac_path
+    end
+    return wezterm.home_dir .. '/dotfiles/wezterm/wallpapers/' .. profile.wallpaper
   end
   return nil  -- 壁紙なし
 end
@@ -942,6 +954,25 @@ config.keys = {
   { key = 'F9', mods = 'NONE', action = launcher_action },
   { key = '9', mods = 'CMD|SHIFT', action = launcher_action },
 }
+
+-- Herdr ワークスペース切替: Ctrl+Shift+1/2/3
+-- ⑤ペイン（herdr-status.sh）の数字キーと同じ動作を、ウィンドウ全体からも呼べるようにする。
+-- Windows 側は会社PCで独自のキーバインドを持っているため、ここでは Mac だけに入れる。
+if not is_windows then
+  local focus_sh = wezterm.home_dir .. '/dotfiles/wezterm/herdr-focus.sh'
+  for n = 1, 3 do
+    table.insert(config.keys, {
+      key = tostring(n),
+      mods = 'CTRL|SHIFT',
+      action = wezterm.action_callback(function()
+        wezterm.background_child_process {
+          '/bin/bash', '-c',
+          mac_path_prefix .. '"' .. focus_sh .. '" ' .. n,
+        }
+      end),
+    })
+  end
+end
 
 -- ===== AI トークン残量ステータスライン =====
 -- 右側に Claude(個/社) のプラン枠使用率（ccusage 近似）と
