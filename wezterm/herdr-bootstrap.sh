@@ -145,21 +145,19 @@ fill_panes() {
   done
 }
 
-# Core Agents: 2x2 ＋ 右下をもう1段割って Antigravity（計5ペイン）
+# Core Agents: 2x2 グリッド（Grok は Extra 専任。2026-08-31 再編）
 setup_core_panes() {
-  local ws_id="$1" p1 p2 p4
+  local ws_id="$1" p1 p2
   if [ "$(pane_count "$ws_id")" -eq 1 ]; then
     p1=$(sorted_pane_ids "$ws_id" | sed -n 1p)
     p2=$(herdr pane split --pane "$p1" --direction right --no-focus \
       | jq -r '.result.pane.pane_id')
     herdr pane split --pane "$p1" --direction down --no-focus >/dev/null
-    p4=$(herdr pane split --pane "$p2" --direction down --no-focus \
-      | jq -r '.result.pane.pane_id')
-    herdr pane split --pane "$p4" --direction down --no-focus >/dev/null
+    herdr pane split --pane "$p2" --direction down --no-focus >/dev/null
   fi
-  fill_panes "$ws_id" 5
+  fill_panes "$ws_id" 4
   apply_pane_labels "$ws_id" \
-    "Claude Personal - Commander" "Codex - Review" "Grok Build" "Claude Work" "Antigravity"
+    "Claude Personal - Commander" "Codex - Review" "Claude Work" "Antigravity"
 }
 
 # Extra Agents: 2x2 の予備枠（Core と同役割の2本目を置く）
@@ -200,17 +198,12 @@ start_agent_if_missing "$(pane_id_by_label "$CORE_WS" 'Codex - Review')" \
   "Codex - Review" \
   bash -c 'cd ~/claude && codex'
 
-# ③ Grok Build
-start_agent_if_missing "$(pane_id_by_label "$CORE_WS" 'Grok Build')" \
-  "Grok Build" \
-  bash -c 'cd ~/claude && grok'
-
-# ④ Claude Work
+# ③ Claude Work
 start_agent_if_missing "$(pane_id_by_label "$CORE_WS" 'Claude Work')" \
   "Claude Work" \
   bash -c 'export CLAUDE_CONFIG_DIR=~/.claude-work; cd ~/claude && claude --model opus'
 
-# ⑤ Antigravity
+# ④ Antigravity（個人アカウント。Extra 側と同一アカウントで並走）
 start_agent_if_missing "$(pane_id_by_label "$CORE_WS" 'Antigravity')" \
   "Antigravity" \
   bash -c 'cd ~/claude && agy'
