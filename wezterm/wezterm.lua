@@ -205,14 +205,14 @@ end
 -- ├──────────┤                    │                  │
 -- │⑥カレンダー│────────────────────│──────────────────│
 -- ├──────────┤④ Grok Build (実装) │③ Claude Code (会社)│
--- │⑤Herdr切替│                    │                  │
+-- │⑤Herdr    │                    │                  │
 -- └──────────┴────────────────────┴──────────────────┘
 --   AIの実体はHerdr管理下。WezTermペインは情報表示用。
 --   Herdrの2ワークスペース（herdr-bootstrap.sh が構築。Ctrl+Shift+H で別窓表示）:
 --     Core Agents  : Claude Personal - Commander / Codex - Review / Grok Build / Claude Work
 --     Extra Agents : Antigravity CLI / Gemini CLI / Claude Extra
 --   ※ Windows の Local LLM ワークスペースは LM Studio / opencode 未導入のため作らない。
---   ※ ⑤ペインは切替メニュー。1/2/3 でワークスペース移動、フォーカス中は * 表示。
+--   ※ ⑤ペインは Herdr 本体(TUI)。ワークスペース切替は Herdr のUIで行う（Windows と同じ）。
 --   ※ Extra を常駐させたくないときは herdr-bootstrap.sh に --skip-extra を渡す。
 --   ※ yazi / lazygit / Shell は常駐から外し F9 ランチャーで随時起動
 wezterm.on('gui-startup', function(cmd)
@@ -303,10 +303,9 @@ wezterm.on('gui-startup', function(cmd)
       pane:send_text('bash ~/dotfiles/wezterm/todoist.sh\r')
       -- ⑥ 左中: カレンダー（Windows の calendar.ps1 と同じ Google Calendar アジェンダ）
       left_mid:send_text('bash ~/dotfiles/wezterm/calendar.sh\r')
-      -- ⑤ 左下: Herdr Cockpit 兼ワークスペース切替メニュー。
-      -- 数字キーで herdr workspace focus を切り替える（Ctrl+Shift+1/2/3 でも同じ）。
-      -- 待ちは最大60秒。上がらなくても状態表示は出す（無限ループで沈黙させない）。
-      left_bottom:send_text('for _ in $(seq 1 120); do "' .. herdr_exe .. '" status server 2>/dev/null | grep -q running && break; sleep 0.5; done; bash ~/dotfiles/wezterm/herdr-status.sh\r')
+      -- ⑤ 左下: Herdr 本体(TUI)。Windows と同じく、ワークスペース切替も Herdr 自身のUIで行う。
+      -- ブートストラップのサーバー起動を待ってから接続する（待ちは最大60秒）。
+      left_bottom:send_text('for _ in $(seq 1 120); do "' .. herdr_exe .. '" status server 2>/dev/null | grep -q running && break; sleep 0.5; done; exec "' .. herdr_exe .. '"\r')
       -- ① 中上: 個人Claudeの司令／壁打ち
       middle_pane:send_text('claude\r')
       -- ④ 中下: Grok Buildの実装ワーカー
@@ -954,25 +953,6 @@ config.keys = {
   { key = 'F9', mods = 'NONE', action = launcher_action },
   { key = '9', mods = 'CMD|SHIFT', action = launcher_action },
 }
-
--- Herdr ワークスペース切替: Ctrl+Shift+1/2/3
--- ⑤ペイン（herdr-status.sh）の数字キーと同じ動作を、ウィンドウ全体からも呼べるようにする。
--- Windows 側は会社PCで独自のキーバインドを持っているため、ここでは Mac だけに入れる。
-if not is_windows then
-  local focus_sh = wezterm.home_dir .. '/dotfiles/wezterm/herdr-focus.sh'
-  for n = 1, 3 do
-    table.insert(config.keys, {
-      key = tostring(n),
-      mods = 'CTRL|SHIFT',
-      action = wezterm.action_callback(function()
-        wezterm.background_child_process {
-          '/bin/bash', '-c',
-          mac_path_prefix .. '"' .. focus_sh .. '" ' .. n,
-        }
-      end),
-    })
-  end
-end
 
 -- ===== AI トークン残量ステータスライン =====
 -- 右側に Claude(個/社) のプラン枠使用率（ccusage 近似）と
