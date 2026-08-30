@@ -143,6 +143,7 @@ else
     { id = 'gemini',     label = 'Gemini CLI',        cmd = 'cd ~/claude && gemini' },
     { id = 'lazygit',    label = 'lazygit',           cmd = 'cd ~/dotfiles && lazygit' },
     { id = 'dashboard',  label = 'Todoist',            cmd = 'bash ~/dotfiles/wezterm/todoist.sh' },
+    { id = 'calendar',   label = '📅 カレンダー',        cmd = 'bash ~/dotfiles/wezterm/calendar.sh' },
     { id = 'codex',      label = 'Codex CLI',          cmd = 'cd ~/claude && codex' },
     { id = 'grok',       label = 'Grok Build',         cmd = 'cd ~/claude && grok' },
     { id = 'yazi',       label = 'yazi',              cmd = 'yazi' },
@@ -199,22 +200,21 @@ end
 --   中 = 上=①会社Claude司令/壁打ち, 下=④Jikko(個人Claude, Opus 4.6固定)
 --   右 = 上=②Codex Sol(個人/レビュー), 下=③Codex Luna(会社/ワーカー)
 --   AIの実体はHerdr管理下（上記ワークスペース参照）。WezTermペインは情報表示用。
--- Mac（個人アカウント中心。③だけ会社Claudeを常駐。実行・検証Shellは F9）:
--- ┌──────────┬────────────────────┬──────────────────┐
--- │⑦Todoist  │① Claude 司令／壁打ち│② Codex (レビュー) │
--- ├──────────┤                    │                  │
--- │⑥カレンダー│────────────────────│──────────────────│
--- ├──────────┤④ Grok Build (実装) │③ Claude Code (会社)│
--- │⑤Herdr    │                    │                  │
--- └──────────┴────────────────────┴──────────────────┘
---   AIの実体はHerdr管理下。WezTermペインは情報表示用。
---   Herdrの2ワークスペース（herdr-bootstrap.sh が構築。Ctrl+Shift+H で別窓表示）:
+-- Mac（2026-08-31〜: 分割なし。ウィンドウ全体が Herdr。会社PCと同じ見た目）:
+-- ┌────────┬──────────────────────────────────────────┐
+-- │ spaces │  フォーカス中ワークスペースのエージェント群 │
+-- │ Core   │  （Herdr が 2x2 等に自動レイアウト）        │
+-- │ Extra  │                                          │
+-- │ agents │  切り替えはサイドバーの spaces をクリック    │
+-- └────────┴──────────────────────────────────────────┘
+--   WezTerm起動 → herdr-bootstrap.sh がサーバー・ワークスペース・AIを整備 →
+--   唯一のペインで herdr 本体(TUI)がフルウィンドウ起動。7ペイン分割はしない。
+--   Herdrの2ワークスペース（herdr-bootstrap.sh が構築）:
 --     Core Agents  : Claude Personal - Commander / Codex - Review / Grok Build / Claude Work
 --     Extra Agents : Antigravity CLI / Gemini CLI / Claude Extra
 --   ※ Windows の Local LLM ワークスペースは LM Studio / opencode 未導入のため作らない。
---   ※ ⑤ペインは Herdr 本体(TUI)。ワークスペース切替は Herdr のUIで行う（Windows と同じ）。
 --   ※ Extra を常駐させたくないときは herdr-bootstrap.sh に --skip-extra を渡す。
---   ※ yazi / lazygit / Shell は常駐から外し F9 ランチャーで随時起動
+--   ※ Todoist / カレンダー / yazi / lazygit / Shell は F9 ランチャーで随時起動
 wezterm.on('gui-startup', function(cmd)
   -- Herdrブートストラップ(-ConfigureOnly)をバックグラウンドで実行。
   -- Cockpit UI は左下ペインで herdr-status.ps1 経由で表示する。
@@ -239,7 +239,15 @@ wezterm.on('gui-startup', function(cmd)
   local tab, pane, window = mux.spawn_window(cmd or {})
   window:gui_window():maximize()
 
-  -- 最大化後の実サイズに対して分割する。
+  -- Mac: 分割しない。ウィンドウ全体で Herdr 本体(TUI)を起動する。
+  -- レイアウトも切り替えメニューも Herdr 自身が持つ（サイドバーの spaces で
+  -- Core Agents / Extra Agents を切り替える）。会社PCと同じ見た目。
+  if not is_windows then
+    pane:send_text('for _ in $(seq 1 120); do "' .. herdr_exe .. '" status server 2>/dev/null | grep -q running && break; sleep 0.5; done; exec "' .. herdr_exe .. '"\r')
+    return
+  end
+
+  -- Windows: 最大化後の実サイズに対して分割する。
   wezterm.time.call_after(0.2, function()
     local bottom_ratio = 0.5  -- 上下等分（2026-06-17）
 
@@ -275,9 +283,8 @@ wezterm.on('gui-startup', function(cmd)
       size = bottom_ratio,
     }
 
-    -- 各ペインでコマンド実行（役割ベース。Windows/Macでアカウント構成だけ分岐）
-
-    if is_windows then
+    -- 各ペインでコマンド実行（このブロックは Windows 専用。Mac は上で return 済み）
+    do
       -- ⑦ 左上: タスク管理ボード（Todoist）
       pane:send_text('& $HOME\\dotfiles\\wezterm\\todoist.ps1\r\n')
       -- ⑥ 左中: カレンダー（calendar.ps1。暫定=月表示 → 後日 Google Calendar 連携へ中身を差し替え）
@@ -296,25 +303,6 @@ wezterm.on('gui-startup', function(cmd)
       right_pane:send_text('cd C:\\claude; $env:AGMSG_AGENT = "codex-sol"; & "$HOME\\dotfiles\\wezterm\\codex-account.ps1" -Account personal\r\n')
       -- ③ 右下: Codex Luna（会社アカウント、ワーカー担当）。
       right_bottom:send_text('cd C:\\claude; $env:AGMSG_AGENT = "codex-luna"; & "$HOME\\dotfiles\\wezterm\\codex-account.ps1" -Account work\r\n')
-    else
-      -- Mac: ①個人Claudeで考える → ④Grokで作る → ③会社Claudeで動かす → ②Codexでレビュー
-      -- send_text は Enter を \r で送る（\n だけだとプロンプトに文字が残って実行されないことがある）
-      -- ⑦ 左上: Todoist
-      pane:send_text('bash ~/dotfiles/wezterm/todoist.sh\r')
-      -- ⑥ 左中: カレンダー（Windows の calendar.ps1 と同じ Google Calendar アジェンダ）
-      left_mid:send_text('bash ~/dotfiles/wezterm/calendar.sh\r')
-      -- ⑤ 左下: Herdr 本体(TUI)。Windows と同じく、ワークスペース切替も Herdr 自身のUIで行う。
-      -- ブートストラップのサーバー起動を待ってから接続する（待ちは最大60秒）。
-      left_bottom:send_text('for _ in $(seq 1 120); do "' .. herdr_exe .. '" status server 2>/dev/null | grep -q running && break; sleep 0.5; done; exec "' .. herdr_exe .. '"\r')
-      -- ① 中上: 個人Claudeの司令／壁打ち
-      middle_pane:send_text('claude\r')
-      -- ④ 中下: Grok Buildの実装ワーカー
-      middle_bottom:send_text('cd ~/claude && grok\r')
-      -- ② 右上: Codexレビュー
-      right_pane:send_text('cd ~/claude && codex\r')
-      -- ③ 右下: 会社Claude。CLAUDE_CONFIG_DIR=~/.claude-work を明示（個人の ~/.claude と分離）。
-      -- 2026-08-16: 実行・検証Shellをここに置いていたが、会社用Claude常駐に差し替え。Shellは F9。
-      right_bottom:send_text('cd ~/claude && CLAUDE_CONFIG_DIR=~/.claude-work claude --model opus\r')
     end
   end)
 end)
