@@ -17,8 +17,14 @@ local is_windows = wezterm.target_triple:find('windows') ~= nil
 
 -- Herdr はAIプロセスの実体を保持し、複数のWezTermウィンドウから同じ
 -- defaultセッションへ接続する。PATHが古いWezTermでも動くよう実体を明示する。
-local herdr_exe = wezterm.home_dir .. '\\AppData\\Local\\Programs\\Herdr\\bin\\herdr.exe'
-local herdr_bootstrap = wezterm.home_dir .. '\\dotfiles\\wezterm\\herdr-bootstrap.ps1'
+local herdr_exe, herdr_bootstrap
+if is_windows then
+  herdr_exe = wezterm.home_dir .. '\\AppData\\Local\\Programs\\Herdr\\bin\\herdr.exe'
+  herdr_bootstrap = wezterm.home_dir .. '\\dotfiles\\wezterm\\herdr-bootstrap.ps1'
+else
+  herdr_exe = 'herdr'
+  herdr_bootstrap = wezterm.home_dir .. '/dotfiles/wezterm/herdr-bootstrap.sh'
+end
 
 -- ローカルLLM(LM Studio)の起動コマンド生成。lms は %USERPROFILE%\.lmstudio\bin にあり、
 -- PATHが古いセッションでも動くよう明示追加する。model は `lms ls --json` の modelKey。
@@ -177,19 +183,27 @@ end
 -- ├──────────┤                    │                  │
 -- │⑥カレンダー│────────────────────│──────────────────│
 -- ├──────────┤④ Grok Build (実装) │③ Claude Code (会社)│
--- │⑤lazygit  │                    │                  │
+-- │⑤Herdr    │                    │                  │
 -- └──────────┴────────────────────┴──────────────────┘
---   ※ Gemini / yazi / Shell は常駐から外し F9 ランチャーで随時起動
+--   AIの実体はHerdr管理下（Core Agentsワークスペース参照）。WezTermペインは情報表示用。
+--   ※ Gemini / yazi / lazygit / Shell は常駐から外し F9 ランチャーで随時起動
 wezterm.on('gui-startup', function(cmd)
   -- Herdrブートストラップ(-ConfigureOnly)をバックグラウンドで実行。
   -- Cockpit UI は左下ペインで herdr-status.ps1 経由で表示する。
-  if is_windows and not cmd then
-    local log = wezterm.home_dir .. '\\AppData\\Local\\herdr\\bootstrap.log'
-    wezterm.background_child_process {
-      'powershell.exe', '-ExecutionPolicy', 'Bypass',
-      '-Command',
-      '& "' .. herdr_bootstrap .. '" -ConfigureOnly *> "' .. log .. '"',
-    }
+  if not cmd then
+    if is_windows then
+      local log = wezterm.home_dir .. '\\AppData\\Local\\herdr\\bootstrap.log'
+      wezterm.background_child_process {
+        'powershell.exe', '-ExecutionPolicy', 'Bypass',
+        '-Command',
+        '& "' .. herdr_bootstrap .. '" -ConfigureOnly *> "' .. log .. '"',
+      }
+    else
+      local log = wezterm.home_dir .. '/.config/herdr/bootstrap.log'
+      wezterm.background_child_process {
+        'bash', herdr_bootstrap, '--configure-only',
+      }
+    end
   end
 
   local tab, pane, window = mux.spawn_window(cmd or {})
@@ -259,8 +273,8 @@ wezterm.on('gui-startup', function(cmd)
       pane:send_text('bash ~/dotfiles/wezterm/todoist.sh\r')
       -- ⑥ 左中: カレンダー
       left_mid:send_text('cal\r')
-      -- ⑤ 左下: lazygit（Macでは軽量な常駐Gitビューとして維持）
-      left_bottom:send_text('cd ~/dotfiles && lazygit\r')
+      -- ⑤ 左下: Herdr Cockpit（ブートストラップ完了を待ってからステータス表示を起動）
+      left_bottom:send_text('while ! herdr status server 2>/dev/null | grep -q running; do sleep 0.5; done; bash ~/dotfiles/wezterm/herdr-status.sh\r')
       -- ① 中上: 個人Claudeの司令／壁打ち
       middle_pane:send_text('claude\r')
       -- ④ 中下: Grok Buildの実装ワーカー
@@ -732,8 +746,8 @@ config.keys = {
   -- Herdr AI Hub: 同じdefaultセッションを専用WezTermウィンドウで開く。
   -- サーバー側のペイン実体は共有されるため、既存7ペインと別窓の双方から確認できる。
   { key = 'h', mods = 'CTRL|SHIFT', action = act.SpawnCommandInNewWindow {
-    args = { herdr_exe },
-    cwd = 'C:\\claude',
+    args = is_windows and { herdr_exe } or { '/bin/bash', '-c', 'herdr' },
+    cwd = is_windows and 'C:\\claude' or (wezterm.home_dir .. '/claude'),
   } },
   -- Pane repair: ローカルLLM(lms chat等)終了後にConPTYの表示がズレて
   -- 上下ペインが繋がって見える現象向けの復旧ショートカット。
