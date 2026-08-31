@@ -1,7 +1,15 @@
 #!/bin/bash
 # herdr-bootstrap.sh — Mac版 Herdr ブートストラップ
-# Windows の herdr-bootstrap.ps1 と同等。WezTerm gui-startup からバックグラウンド実行される。
-# 用法: herdr-bootstrap.sh [--configure-only] [--skip-extra]
+# Windows の herdr-bootstrap.ps1 と同等の構成（2026-08-31 v2再編で Windows 準拠へ統一）。
+# WezTerm gui-startup からバックグラウンド実行される。
+# 用法: herdr-bootstrap.sh [--configure-only] [--skip-extra] [--skip-review]
+#
+#   w1 CORE   : 常用4枠
+#   w2 REVIEW : 会社CCによる並列レビュー専用4枠（新設）
+#   w3 EXTRA  : 予備枠
+#
+# レビュー依頼は CORE のセッションから直接行わず、handoff / ai-delegate 経由で
+# REVIEW 枠へ渡す（実装セッションに自分の成果をレビューさせない）。
 
 set -euo pipefail
 
@@ -27,12 +35,22 @@ fi
 
 CONFIGURE_ONLY=false
 SKIP_EXTRA=false
+SKIP_REVIEW=false
 for arg in "$@"; do
   case "$arg" in
     --configure-only) CONFIGURE_ONLY=true ;;
     --skip-extra)     SKIP_EXTRA=true ;;
+    --skip-review)    SKIP_REVIEW=true ;;
   esac
 done
+
+WORK_ROOT="$HOME/claude"
+CODEX_ACCOUNT_SCRIPT="$HOME/dotfiles/wezterm/codex-account.sh"
+
+# ワークスペースは「番号順 = この並び順」で扱う。herdr には並べ替えコマンドが無く、
+# 番号は作成順で決まる。新規セッションではこの順に作られ、既存セッションでは
+# 不足分が末尾に追加される（順番を正すには herdr server の作り直しが要る）。
+WORKSPACE_PLAN=('Core Agents' 'Review Agents' 'Extra Agents')
 
 # ---------- サーバー管理 ----------
 
@@ -51,12 +69,71 @@ start_server() {
   exit 1
 }
 
-# ---------- JSON ヘルパー ----------
+# ---------- ワークスペース ----------
+
+ws_labels_in_order() {
+  herdr workspace list 2>/dev/null \
+    | jq -r '.result.workspaces | sort_by(.number)[] | .label'
+}
+
+ws_ids_in_order() {
+  herdr workspace list 2>/dev/null \
+    | jq -r '.result.workspaces | sort_by(.number)[] | .workspace_id'
+}
 
 ws_id_by_label() {
   herdr workspace list 2>/dev/null \
     | jq -r --arg l "$1" '.result.workspaces[] | select(.label==$l) | .workspace_id' \
     | head -1
+}
+
+plan_contains() {
+  local needle="$1" item
+  for item in "${WORKSPACE_PLAN[@]}"; do
+    [ "$item" = "$needle" ] && return 0
+  done
+  return 1
+}
+
+# 計画順にワークスペースを解決する。
+#   1. 同じラベルが既にあればそれを使う
+#   2. その位置に「計画外のラベル」のワークスペースがあれば採用してリネームする
+#      （新規セッションの既定ワークスペースを w1 CORE として拾うため）
+#   3. どちらでもなければ新規作成する（既存セッションでは末尾に付く）
+resolve_workspace() {
+  local index="$1" label="$2" ws_id candidate_id candidate_label
+
+  ws_id=$(ws_id_by_label "$label")
+  if [ -n "$ws_id" ]; then
+    echo "$ws_id"
+    return
+  fi
+
+  candidate_id=$(ws_ids_in_order | sed -n "$((index + 1))p")
+  candidate_label=$(ws_labels_in_order | sed -n "$((index + 1))p")
+  if [ -n "$candidate_id" ] && ! plan_contains "$candidate_label"; then
+    echo "Renaming workspace: $candidate_label -> $label" >&2
+    herdr workspace rename "$candidate_id" "$label" >/dev/null
+    echo "$candidate_id"
+    return
+  fi
+
+  echo "Creating workspace: $label" >&2
+  herdr workspace create --label "$label" --cwd "$WORK_ROOT" --no-focus \
+    | jq -r '.result.workspace.workspace_id'
+}
+
+# ---------- ペイン ----------
+# pane_id は "w3:p1" 形式。作成順に採番されるので、番号順に並べれば
+# 左上→右上→左下→右下 の並びになる。
+sorted_pane_ids() {
+  herdr pane list --workspace "$1" 2>/dev/null \
+    | jq -r '.result.panes[].pane_id' \
+    | sort -t: -k2 -V
+}
+
+pane_count() {
+  herdr pane list --workspace "$1" 2>/dev/null | jq '.result.panes | length'
 }
 
 pane_id_by_label() {
@@ -65,18 +142,45 @@ pane_id_by_label() {
     | head -1
 }
 
-first_pane_id() {
-  herdr pane list --workspace "$1" 2>/dev/null \
-    | jq -r '.result.panes[0].pane_id' \
-    | head -1
+# 目標枚数までペインを用意する。既に足りていれば何もしない（冪等）。
+init_pane_grid() {
+  local ws_id="$1" want="$2" p1 p2
+  if [ "$want" -eq 4 ] && [ "$(pane_count "$ws_id")" -eq 1 ]; then
+    p1=$(sorted_pane_ids "$ws_id" | sed -n 1p)
+    p2=$(herdr pane split --pane "$p1" --direction right --no-focus \
+      | jq -r '.result.pane.pane_id')
+    herdr pane split --pane "$p1" --direction down --no-focus >/dev/null
+    herdr pane split --pane "$p2" --direction down --no-focus >/dev/null
+  fi
+
+  # 不足分は最後のペインを下に割って埋める
+  while [ "$(pane_count "$ws_id")" -lt "$want" ]; do
+    herdr pane split --pane "$(sorted_pane_ids "$ws_id" | tail -1)" \
+      --direction down --no-focus >/dev/null
+  done
 }
+
+# ラベルを pane_id 昇順で割り当てる。以降のエージェント起動は
+# 並び順ではなくラベルで引く（herdr pane list の返却順は作成順ではない。2026-08-30の学び）。
+apply_pane_labels() {
+  local ws_id="$1"
+  shift
+  local i=1 pid
+  for label in "$@"; do
+    pid=$(sorted_pane_ids "$ws_id" | sed -n "${i}p")
+    if [ -n "$pid" ]; then
+      herdr pane rename "$pid" "$label" >/dev/null
+    fi
+    i=$((i + 1))
+  done
+}
+
+# ---------- エージェント ----------
 
 live_agent_pane_ids() {
   herdr agent list 2>/dev/null \
     | jq -r '.result.agents[].pane_id' 2>/dev/null || true
 }
-
-# ---------- エージェント起動 ----------
 
 start_agent_if_missing() {
   local pane_id="$1" display_name="$2"
@@ -93,138 +197,81 @@ start_agent_if_missing() {
   herdr pane run "$pane_id" "$@"
 }
 
-# ---------- ワークスペース構築 ----------
-
-ensure_workspace() {
-  local label="$1"
-  local ws_id
-  ws_id=$(ws_id_by_label "$label")
-  if [ -n "$ws_id" ]; then
-    echo "$ws_id"
-    return
-  fi
-  echo "Creating workspace: $label" >&2
-  herdr workspace create --label "$label" --cwd "$HOME/claude" --no-focus \
-    | jq -r '.result.workspace.workspace_id'
-}
-
-# ---------- ペイン構築 ----------
-# pane_id は "w3:p1" 形式。作成順に採番されるので、番号順に並べれば
-# 左上→右上→左下→右下 の並びになる。
-sorted_pane_ids() {
-  herdr pane list --workspace "$1" 2>/dev/null \
-    | jq -r '.result.panes[].pane_id' \
-    | sort -t: -k2 -V
-}
-
-pane_count() {
-  herdr pane list --workspace "$1" 2>/dev/null | jq '.result.panes | length'
-}
-
-# ラベルを pane_id 昇順で割り当てる。以降のエージェント起動は
-# 並び順ではなくラベルで引く（Windows の Get-PaneByLabel と同じ考え方）。
-apply_pane_labels() {
-  local ws_id="$1"
-  shift
-  local i=1 pid
-  for label in "$@"; do
-    pid=$(sorted_pane_ids "$ws_id" | sed -n "${i}p")
-    if [ -n "$pid" ]; then
-      herdr pane rename "$pid" "$label" >/dev/null
-    fi
-    i=$((i + 1))
-  done
-}
-
-# 不足分は最後のペインを下に割って埋める
-fill_panes() {
-  local ws_id="$1" want="$2"
-  while [ "$(pane_count "$ws_id")" -lt "$want" ]; do
-    herdr pane split --pane "$(sorted_pane_ids "$ws_id" | tail -1)" \
-      --direction down --no-focus >/dev/null
-  done
-}
-
-# Core Agents: 2x2 グリッド（Grok は Extra 専任。2026-08-31 再編）
-setup_core_panes() {
-  local ws_id="$1" p1 p2
-  if [ "$(pane_count "$ws_id")" -eq 1 ]; then
-    p1=$(sorted_pane_ids "$ws_id" | sed -n 1p)
-    p2=$(herdr pane split --pane "$p1" --direction right --no-focus \
-      | jq -r '.result.pane.pane_id')
-    herdr pane split --pane "$p1" --direction down --no-focus >/dev/null
-    herdr pane split --pane "$p2" --direction down --no-focus >/dev/null
-  fi
-  fill_panes "$ws_id" 4
-  apply_pane_labels "$ws_id" \
-    "Claude Personal - Commander" "Codex - Review" "Claude Work" "Antigravity"
-}
-
-# Extra Agents: 2x2 の予備枠（Core と同役割の2本目を置く）
-setup_extra_panes() {
-  local ws_id="$1" p1 p2
-  if [ "$(pane_count "$ws_id")" -eq 1 ]; then
-    p1=$(sorted_pane_ids "$ws_id" | sed -n 1p)
-    p2=$(herdr pane split --pane "$p1" --direction right --no-focus \
-      | jq -r '.result.pane.pane_id')
-    herdr pane split --pane "$p1" --direction down --no-focus >/dev/null
-    herdr pane split --pane "$p2" --direction down --no-focus >/dev/null
-  fi
-  fill_panes "$ws_id" 4
-  apply_pane_labels "$ws_id" \
-    "Antigravity - Extra" "Grok - Extra" "Claude Work - Extra" "Codex - Extra"
-}
-
 # ---------- メイン ----------
 
 start_server
 
-CORE_WS=$(ensure_workspace "Core Agents")
-setup_core_panes "$CORE_WS"
+CORE_WS=$(resolve_workspace 0 'Core Agents')
+REVIEW_WS=$(resolve_workspace 1 'Review Agents')
+EXTRA_WS=$(resolve_workspace 2 'Extra Agents')
 
-EXTRA_WS=$(ensure_workspace "Extra Agents")
-setup_extra_panes "$EXTRA_WS"
+# CORE: Windows 準拠。会社CC / 個人Codex / 個人CC / 会社Codex の2x2。
+init_pane_grid "$CORE_WS" 4
+apply_pane_labels "$CORE_WS" \
+  'Claude Work - Commander' 'Codex Personal - Plan/Build' \
+  'Claude Personal - Utility' 'Codex Work - Luna'
+
+# REVIEW: 4枠すべて会社アカウント。並列レビュー前提（2026-08-31 新設）。
+init_pane_grid "$REVIEW_WS" 4
+apply_pane_labels "$REVIEW_WS" \
+  'Claude Work - Review A' 'Claude Work - Review B' \
+  'Claude Work - Review C' 'Claude Work - Review D'
+
+# EXTRA: 予備枠。Codex Extra は REVIEW の二次レビュー用に都度使う。
+init_pane_grid "$EXTRA_WS" 4
+apply_pane_labels "$EXTRA_WS" \
+  'Grok' 'Antigravity CLI' 'Claude Work - Extra' 'Codex - Extra'
 
 LIVE_PANE_IDS=$(live_agent_pane_ids)
 
-# --- Core Agents ---
-# ① Claude Personal - Commander
-start_agent_if_missing "$(pane_id_by_label "$CORE_WS" 'Claude Personal - Commander')" \
-  "Claude Personal - Commander" \
-  bash -c 'unset CLAUDE_CONFIG_DIR; cd ~/claude && claude'
+# Mac のプロファイル対応は Windows と逆:
+#   個人 = 既定の ~/.claude / 会社 = ~/.claude-work
+CLAUDE_WORK_DIR="$HOME/.claude-work"
 
-# ② Codex - Review
-start_agent_if_missing "$(pane_id_by_label "$CORE_WS" 'Codex - Review')" \
-  "Codex - Review" \
-  bash -c 'cd ~/claude && codex'
+# --- CORE ---
+start_agent_if_missing "$(pane_id_by_label "$CORE_WS" 'Claude Work - Commander')" \
+  'Claude Work - Commander' \
+  bash -c "export CLAUDE_CONFIG_DIR=$CLAUDE_WORK_DIR AGMSG_AGENT=commander; cd $WORK_ROOT && claude --model opus --name commander"
 
-# ③ Claude Work
-start_agent_if_missing "$(pane_id_by_label "$CORE_WS" 'Claude Work')" \
-  "Claude Work" \
-  bash -c 'export CLAUDE_CONFIG_DIR=~/.claude-work; cd ~/claude && claude --model opus'
+start_agent_if_missing "$(pane_id_by_label "$CORE_WS" 'Codex Personal - Plan/Build')" \
+  'Codex Personal - Plan/Build' \
+  bash -c "export AGMSG_AGENT=codex-sol; cd $WORK_ROOT && $CODEX_ACCOUNT_SCRIPT personal"
 
-# ④ Antigravity（個人アカウント。Extra 側と同一アカウントで並走）
-start_agent_if_missing "$(pane_id_by_label "$CORE_WS" 'Antigravity')" \
-  "Antigravity" \
-  bash -c 'cd ~/claude && agy'
+start_agent_if_missing "$(pane_id_by_label "$CORE_WS" 'Claude Personal - Utility')" \
+  'Claude Personal - Utility' \
+  bash -c "unset CLAUDE_CONFIG_DIR; export AGMSG_AGENT=jikko; cd $WORK_ROOT && claude --name jikko"
 
-# --- Extra Agents（Core と同役割の予備枠。--skip-extra で丸ごと省略できる）---
+start_agent_if_missing "$(pane_id_by_label "$CORE_WS" 'Codex Work - Luna')" \
+  'Codex Work - Luna' \
+  bash -c "export AGMSG_AGENT=codex-luna; cd $WORK_ROOT && $CODEX_ACCOUNT_SCRIPT work"
+
+# --- REVIEW（会社アカウント固定）---
+if [ "$SKIP_REVIEW" = false ]; then
+  for slot in A B C D; do
+    name="review-$(echo "$slot" | tr 'A-Z' 'a-z')"
+    start_agent_if_missing "$(pane_id_by_label "$REVIEW_WS" "Claude Work - Review $slot")" \
+      "Claude Work - Review $slot" \
+      bash -c "export CLAUDE_CONFIG_DIR=$CLAUDE_WORK_DIR AGMSG_AGENT=$name; cd $WORK_ROOT && claude --model opus --name $name"
+  done
+fi
+
+# --- EXTRA（--skip-extra で丸ごと省略できる）---
 if [ "$SKIP_EXTRA" = false ]; then
-  start_agent_if_missing "$(pane_id_by_label "$EXTRA_WS" 'Antigravity - Extra')" \
-    "Antigravity - Extra" \
-    bash -c 'cd ~/claude && agy'
+  start_agent_if_missing "$(pane_id_by_label "$EXTRA_WS" 'Grok')" \
+    'Grok' \
+    bash -c "cd $WORK_ROOT && grok"
 
-  start_agent_if_missing "$(pane_id_by_label "$EXTRA_WS" 'Grok - Extra')" \
-    "Grok - Extra" \
-    bash -c 'cd ~/claude && grok'
+  start_agent_if_missing "$(pane_id_by_label "$EXTRA_WS" 'Antigravity CLI')" \
+    'Antigravity CLI' \
+    bash -c "cd $WORK_ROOT && agy"
 
   start_agent_if_missing "$(pane_id_by_label "$EXTRA_WS" 'Claude Work - Extra')" \
-    "Claude Work - Extra" \
-    bash -c 'export CLAUDE_CONFIG_DIR=~/.claude-work; cd ~/claude && claude --model opus'
+    'Claude Work - Extra' \
+    bash -c "export CLAUDE_CONFIG_DIR=$CLAUDE_WORK_DIR AGMSG_AGENT=claude-extra; cd $WORK_ROOT && claude --model opus --name claude-extra"
 
   start_agent_if_missing "$(pane_id_by_label "$EXTRA_WS" 'Codex - Extra')" \
-    "Codex - Extra" \
-    bash -c 'cd ~/claude && codex'
+    'Codex - Extra' \
+    bash -c "export AGMSG_AGENT=codex-extra; cd $WORK_ROOT && $CODEX_ACCOUNT_SCRIPT work"
 fi
 
 herdr workspace focus "$CORE_WS" >/dev/null 2>&1 || true

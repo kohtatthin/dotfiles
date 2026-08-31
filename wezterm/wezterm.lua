@@ -169,18 +169,27 @@ end
 -- ┌────────┬──────────────────────────────────────────┐
 -- │ spaces │  フォーカス中ワークスペースのエージェント群 │
 -- │ Core   │  （Herdr が 2x2 等に自動レイアウト）        │
--- │ Extra  │                                          │
--- │ agents │  切り替えはサイドバーの spaces をクリック    │
+-- │ Review │                                          │
+-- │ Extra  │  切り替えはサイドバーの spaces をクリック    │
 -- └────────┴──────────────────────────────────────────┘
 --   起動時に herdr-bootstrap（-ConfigureOnly / --configure-only）をバックグラウンドで走らせ、
 --   サーバー起動→ワークスペース/ペイン構成→エージェント起動まで行う。
 --   その完了をペイン側で待ってから herdr TUI クライアントを起動する。
---   Herdrのワークスペース（herdr-bootstrap が構築。2026-08-31 再編）:
---     Core Agents  : Claude Personal - Commander / Codex - Review / Claude Work / Antigravity（2x2）
---     Extra Agents : Antigravity / Grok / Claude Work / Codex の各 Extra（2x2。Grok はここ専任）
---   ※ Antigravity は Core / Extra とも個人アカウント
+--   Herdrのワークスペース（herdr-bootstrap が構築。2026-08-31 v2再編で Win/Mac 統一）:
+--     w1 Core Agents   : Claude Work - Commander / Codex Personal - Plan/Build /
+--                        Claude Personal - Utility / Codex Work - Luna（2x2）
+--     w2 Review Agents : Claude Work - Review A/B/C/D（2x2。4枠すべて会社アカウント）
+--     w3 Extra Agents  : Grok / Antigravity CLI / Claude Work - Extra /
+--                        Local LLM - Extra（Win）または Codex - Extra（Mac）（2x2）
+--     w4 Local LLM     : LFM/Qwen/Gemma/Nemotron スロット（Windows のみ）
+--   ※ REVIEW はレビュー専任。依頼は CORE のセッションから直接せず、
+--      handoff / ai-delegate 経由で渡す（実装セッションに自分の成果をレビューさせない）。
 --   ※ Mac の Local LLM ワークスペースは LM Studio / opencode 未導入のため作らない。
 --   ※ Extra を常駐させたくないときは herdr-bootstrap に --skip-extra / -SkipExtra を渡す。
+--      REVIEW を常駐させたくないときは --skip-review / -SkipReview を渡す。
+--   ※ ワークスペース番号は herdr の作成順で決まる（並べ替えコマンドが無い）。
+--      既存セッションに後から REVIEW を足すと末尾に付くため、番号どおりに
+--      並べたい場合は herdr server を作り直してから bootstrap を走らせる。
 --   ※ Todoist / カレンダー / yazi / lazygit / Shell は F9 ランチャーで随時起動する。
 --      F9ランチャーはHerdr管理外で、現在ペインにアプリを直接起動する。
 wezterm.on('gui-startup', function(cmd)
@@ -842,7 +851,8 @@ config.keys = {
       end),
     },
   },
-  -- Herdr workspace switch: Ctrl+Shift+1/2/3 で Core/Extra/Local LLM を切替
+  -- Herdr workspace switch: Ctrl+Shift+1/2/3/4 で Core/Review/Extra/Local LLM を切替
+  -- 番号は herdr の作成順（bootstrap の WORKSPACE_PLAN / $workspacePlan の並び）に対応する。
   { key = '1', mods = 'CTRL|SHIFT', action = wezterm.action_callback(function()
     wezterm.background_child_process { herdr_exe, 'workspace', 'focus', 'w1' }
   end) },
@@ -851,6 +861,9 @@ config.keys = {
   end) },
   { key = '3', mods = 'CTRL|SHIFT', action = wezterm.action_callback(function()
     wezterm.background_child_process { herdr_exe, 'workspace', 'focus', 'w3' }
+  end) },
+  { key = '4', mods = 'CTRL|SHIFT', action = wezterm.action_callback(function()
+    wezterm.background_child_process { herdr_exe, 'workspace', 'focus', 'w4' }
   end) },
   -- Launcher menu: アプリ切り替え
   -- Win/Mac とも F9。Mac では Mission Control 等に F9 を奪われやすいので
