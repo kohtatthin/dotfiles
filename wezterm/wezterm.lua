@@ -208,7 +208,7 @@ wezterm.on('gui-startup', function(cmd)
 
   -- 分割しない。ブートストラップでサーバーが上がるのを待ってから Herdr 本体(TUI)を起動。
   if is_windows then
-    pane:send_text('do { Start-Sleep -Milliseconds 500 } until (& "' .. herdr_exe .. '" status server 2>$null; $?); & "' .. herdr_exe .. '"\r\n')
+    pane:send_text('foreach ($i in 1..120) { $s = & "' .. herdr_exe .. '" status server 2>$null; if ($s -match "running") { break }; Start-Sleep -Milliseconds 500 }; & "' .. herdr_exe .. '"\r\n')
   else
     pane:send_text('for _ in $(seq 1 120); do "' .. herdr_exe .. '" status server 2>/dev/null | grep -q running && break; sleep 0.5; done; exec "' .. herdr_exe .. '"\r')
   end
