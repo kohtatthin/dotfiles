@@ -17,8 +17,36 @@ local is_windows = wezterm.target_triple:find('windows') ~= nil
 
 -- Herdr はAIプロセスの実体を保持し、複数のWezTermウィンドウから同じ
 -- defaultセッションへ接続する。PATHが古いWezTermでも動くよう実体を明示する。
-local herdr_exe = wezterm.home_dir .. '\\AppData\\Local\\Programs\\Herdr\\bin\\herdr.exe'
-local herdr_bootstrap = wezterm.home_dir .. '\\dotfiles\\wezterm\\herdr-bootstrap.ps1'
+local herdr_exe, herdr_bootstrap
+if is_windows then
+  herdr_exe = wezterm.home_dir .. '\\AppData\\Local\\Programs\\Herdr\\bin\\herdr.exe'
+  herdr_bootstrap = wezterm.home_dir .. '\\dotfiles\\wezterm\\herdr-bootstrap.ps1'
+else
+  -- macOS: Dock/Finder から起動した WezTerm の PATH は /usr/bin:/bin:/usr/sbin:/sbin だけで、
+  -- Homebrew の bin が入らない。gui-startup から呼ぶ子プロセスが `herdr` を解決できず
+  -- ブートストラップが無言で落ちるため、実体パスを探して使う（2026-08-30）。
+  herdr_exe = 'herdr'
+  for _, candidate in ipairs {
+    '/opt/homebrew/bin/herdr',                 -- Apple Silicon の Homebrew
+    '/usr/local/bin/herdr',                    -- Intel の Homebrew
+    wezterm.home_dir .. '/.local/bin/herdr',
+  } do
+    local f = io.open(candidate, 'r')
+    if f then
+      f:close()
+      herdr_exe = candidate
+      break
+    end
+  end
+  herdr_bootstrap = wezterm.home_dir .. '/dotfiles/wezterm/herdr-bootstrap.sh'
+end
+
+-- macOS で WezTerm が直接起動する子プロセスに渡す PATH。
+-- 非対話ログインシェルは ~/.zshrc を読まないため codex(.npm-global) や grok(.grok) が落ちる。
+-- 対話 zsh と同じ並びをここで明示する。
+local mac_path_prefix =
+  'export PATH="$HOME/.local/bin:$HOME/.npm-global/bin:$HOME/.grok/bin:'
+  .. '/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:$PATH"; '
 
 -- ローカルLLM(LM Studio)の起動コマンド生成。lms は %USERPROFILE%\.lmstudio\bin にあり、
 -- PATHが古いセッションでも動くよう明示追加する。model は `lms ls --json` の modelKey。
@@ -115,6 +143,7 @@ else
     { id = 'gemini',     label = 'Gemini CLI',        cmd = 'cd ~/claude && gemini' },
     { id = 'lazygit',    label = 'lazygit',           cmd = 'cd ~/dotfiles && lazygit' },
     { id = 'dashboard',  label = 'Todoist',            cmd = 'bash ~/dotfiles/wezterm/todoist.sh' },
+    { id = 'calendar',   label = '📅 カレンダー',        cmd = 'bash ~/dotfiles/wezterm/calendar.sh' },
     { id = 'codex',      label = 'Codex CLI',          cmd = 'cd ~/claude && codex' },
     { id = 'grok',       label = 'Grok Build',         cmd = 'cd ~/claude && grok' },
     { id = 'yazi',       label = 'yazi',              cmd = 'yazi' },
@@ -134,66 +163,54 @@ for _, app in ipairs(launcher_apps) do
   launcher_cmds[app.id] = app.cmd
 end
 
--- ===== レイアウト =====
--- Windows: Herdr TUI をフルウィンドウで起動。Herdr側の左ペインでワークスペース切替、
---   右側にAIペインが表示される。AIプロセスはすべてHerdr管理下。
---   herdr-bootstrap.ps1 がサーバー起動→ワークスペース/ペイン構成→エージェント起動を行い、
---   完了後に herdr（引数なし）でTUIクライアントを起動する。
--- Mac: 従来の7ペインレイアウト（Herdr未対応）。
--- ┌──────────┬────────────────────┬──────────────────┐
--- │⑦Todoist  │① Claude 司令／壁打ち│② Codex (レビュー) │
--- ├──────────┤                    │                  │
--- │⑥カレンダー│────────────────────│──────────────────│
--- ├──────────┤④ Grok Build (実装) │③ Claude Code (会社)│
--- │⑤lazygit  │                    │                  │
--- └──────────┴────────────────────┴──────────────────┘
+-- ===== レイアウト（2026-08-31 統合: Windows / Mac とも Herdr TUI フルウィンドウ） =====
+-- WezTerm は分割せず、唯一のペインで Herdr 本体(TUI)を全画面起動する。
+-- レイアウトもワークスペース切替も Herdr 自身が持つ（サイドバーの spaces をクリック）。
+-- ┌────────┬──────────────────────────────────────────┐
+-- │ spaces │  フォーカス中ワークスペースのエージェント群 │
+-- │ Core   │  （Herdr が 2x2 等に自動レイアウト）        │
+-- │ Extra  │                                          │
+-- │ agents │  切り替えはサイドバーの spaces をクリック    │
+-- └────────┴──────────────────────────────────────────┘
+--   起動時に herdr-bootstrap（-ConfigureOnly / --configure-only）をバックグラウンドで走らせ、
+--   サーバー起動→ワークスペース/ペイン構成→エージェント起動まで行う。
+--   その完了をペイン側で待ってから herdr TUI クライアントを起動する。
+--   Herdrのワークスペース（herdr-bootstrap が構築。2026-08-31 再編）:
+--     Core Agents  : Claude Personal - Commander / Codex - Review / Claude Work / Antigravity（2x2）
+--     Extra Agents : Antigravity / Grok / Claude Work / Codex の各 Extra（2x2。Grok はここ専任）
+--   ※ Antigravity は Core / Extra とも個人アカウント
+--   ※ Mac の Local LLM ワークスペースは LM Studio / opencode 未導入のため作らない。
+--   ※ Extra を常駐させたくないときは herdr-bootstrap に --skip-extra / -SkipExtra を渡す。
+--   ※ Todoist / カレンダー / yazi / lazygit / Shell は F9 ランチャーで随時起動する。
+--      F9ランチャーはHerdr管理外で、現在ペインにアプリを直接起動する。
 wezterm.on('gui-startup', function(cmd)
+  -- Herdrブートストラップ(ConfigureOnly)をバックグラウンドで実行。
+  -- 無言で落ちると原因を追えないため、出力は必ずログへ落とす。
+  if not cmd then
+    if is_windows then
+      local log = wezterm.home_dir .. '\\AppData\\Local\\herdr\\bootstrap.log'
+      wezterm.background_child_process {
+        'powershell.exe', '-ExecutionPolicy', 'Bypass',
+        '-Command',
+        '& "' .. herdr_bootstrap .. '" -ConfigureOnly *> "' .. log .. '"',
+      }
+    else
+      local log = wezterm.home_dir .. '/.config/herdr/bootstrap.log'
+      wezterm.background_child_process {
+        '/bin/bash', '-c',
+        mac_path_prefix .. 'exec "' .. herdr_bootstrap .. '" --configure-only >"' .. log .. '" 2>&1',
+      }
+    end
+  end
+
   local tab, pane, window = mux.spawn_window(cmd or {})
   window:gui_window():maximize()
 
+  -- 分割しない。ブートストラップでサーバーが上がるのを待ってから Herdr 本体(TUI)を起動。
   if is_windows then
-    -- Herdr TUI をフルウィンドウで起動。
-    -- bootstrap がサーバー起動・ワークスペース構成・エージェント起動を行い、
-    -- 完了後に herdr TUI が立ち上がる（-ConfigureOnly なし = TUI起動まで行う）。
-    pane:send_text('& "' .. herdr_bootstrap .. '"\r\n')
+    pane:send_text('do { Start-Sleep -Milliseconds 500 } until (& "' .. herdr_exe .. '" status server 2>$null; $?); & "' .. herdr_exe .. '"\r\n')
   else
-    -- Mac: 従来の7ペインレイアウト
-    wezterm.time.call_after(0.2, function()
-      local bottom_ratio = 0.5
-
-      local right_pane = pane:split {
-        direction = 'Right',
-        size = 4 / 10,
-      }
-      local middle_pane = pane:split {
-        direction = 'Right',
-        size = 2 / 3,
-      }
-      local left_mid = pane:split {
-        direction = 'Bottom',
-        size = 2 / 3,
-      }
-      local left_bottom = left_mid:split {
-        direction = 'Bottom',
-        size = 1 / 2,
-      }
-      local middle_bottom = middle_pane:split {
-        direction = 'Bottom',
-        size = bottom_ratio,
-      }
-      local right_bottom = right_pane:split {
-        direction = 'Bottom',
-        size = bottom_ratio,
-      }
-
-      pane:send_text('bash ~/dotfiles/wezterm/todoist.sh\r')
-      left_mid:send_text('cal\r')
-      left_bottom:send_text('cd ~/dotfiles && lazygit\r')
-      middle_pane:send_text('claude\r')
-      middle_bottom:send_text('cd ~/claude && grok\r')
-      right_pane:send_text('cd ~/claude && codex\r')
-      right_bottom:send_text('cd ~/claude && CLAUDE_CONFIG_DIR=~/.claude-work claude --model opus\r')
-    end)
+    pane:send_text('for _ in $(seq 1 120); do "' .. herdr_exe .. '" status server 2>/dev/null | grep -q running && break; sleep 0.5; done; exec "' .. herdr_exe .. '"\r')
   end
 end)
 
@@ -353,7 +370,9 @@ if is_windows then
   wallpaper_file = wezterm.home_dir .. '/dotfiles/wezterm/wallpapers/workshop-brutalist-4k.png'
   wallpaper_dir = wezterm.home_dir .. '\\dotfiles\\wezterm\\wallpapers\\'
 else
-  wallpaper_file = wezterm.home_dir .. '/dotfiles/wezterm/wallpaper.jpg'
+  -- 既定の壁紙は Windows と同じもの（wallpapers/ 直下の共有ファイルを参照する）。
+  -- 差し替え候補の一覧（Cmd+Shift+I）は従来どおり wallpapers/mac/ を見る。
+  wallpaper_file = wezterm.home_dir .. '/dotfiles/wezterm/wallpapers/workshop-brutalist-4k.png'
   wallpaper_dir = wezterm.home_dir .. '/dotfiles/wezterm/wallpapers/mac/'
 end
 
@@ -410,7 +429,8 @@ else
     config.background = {
       {
         source = { File = saved_wp or wallpaper_file },
-        hsb = { brightness = 0.1 },
+        -- 元画像を暗色に調整済みなので、質感が残る程度の明るさにする（Windows と同値）。
+        hsb = { brightness = 0.45 },
         opacity = 0.9,
         horizontal_align = 'Center',
         vertical_align = 'Middle',
@@ -520,9 +540,16 @@ local function resolve_wallpaper(profile)
   elseif profile.wallpaper and profile.wallpaper ~= false then
     if is_windows then
       return wezterm.home_dir .. '\\dotfiles\\wezterm\\wallpapers\\' .. profile.wallpaper
-    else
-      return wezterm.home_dir .. '/dotfiles/wezterm/wallpapers/mac/' .. profile.wallpaper
     end
+    -- Mac は wallpapers/mac/ を優先し、無ければ Windows と共有の wallpapers/ を見る。
+    -- （workshop-brutalist-4k.png のように mac/ に複製していないファイルがあるため）
+    local mac_path = wezterm.home_dir .. '/dotfiles/wezterm/wallpapers/mac/' .. profile.wallpaper
+    local f = io.open(mac_path, 'r')
+    if f then
+      f:close()
+      return mac_path
+    end
+    return wezterm.home_dir .. '/dotfiles/wezterm/wallpapers/' .. profile.wallpaper
   end
   return nil  -- 壁紙なし
 end
@@ -655,8 +682,9 @@ config.keys = {
   -- Herdr AI Hub: 同じdefaultセッションを専用WezTermウィンドウで開く。
   -- サーバー側のペイン実体は共有されるため、既存7ペインと別窓の双方から確認できる。
   { key = 'h', mods = 'CTRL|SHIFT', action = act.SpawnCommandInNewWindow {
-    args = { herdr_exe },
-    cwd = 'C:\\claude',
+    args = is_windows and { herdr_exe }
+      or { '/bin/bash', '-c', mac_path_prefix .. 'exec "' .. herdr_exe .. '"' },
+    cwd = is_windows and 'C:\\claude' or (wezterm.home_dir .. '/claude'),
   } },
   -- Pane repair: ローカルLLM(lms chat等)終了後にConPTYの表示がズレて
   -- 上下ペインが繋がって見える現象向けの復旧ショートカット。
