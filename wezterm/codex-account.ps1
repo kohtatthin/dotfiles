@@ -11,34 +11,58 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-$profiles = @{
-    work = @{
-        Label = 'WORK'
-        Email = 'tamura.k@t-sss.co.jp'
-        Home = Join-Path $env:USERPROFILE '.codex-work'
+switch ($Account) {
+    'work' {
+        $accountLabel = 'WORK'
+        $accountEmail = 'tamura.k@t-sss.co.jp'
+        $accountHome = Join-Path -Path $env:USERPROFILE -ChildPath '.codex-work'
     }
-    personal = @{
-        Label = 'PERSONAL'
-        Email = 'densontamra@gmail.com'
-        Home = Join-Path $env:USERPROFILE '.codex-personal'
+    'personal' {
+        $accountLabel = 'PERSONAL'
+        $accountEmail = 'densontamra@gmail.com'
+        # Share history and resume state with the desktop app.
+        # Keep Work isolated under .codex-work.
+        $accountHome = Join-Path -Path $env:USERPROFILE -ChildPath '.codex'
     }
 }
 
-$profile = $profiles[$Account]
+if ([string]::IsNullOrWhiteSpace($accountHome)) {
+    throw ('Failed to resolve CODEX_HOME for account: {0}' -f $Account)
+}
 
 # Codex validates CODEX_HOME before login and will not create a missing root.
 # Create only the selected account home before exporting the variable.
-if (-not (Test-Path -LiteralPath $profile.Home)) {
-    New-Item -ItemType Directory -Path $profile.Home -Force | Out-Null
+if (-not (Test-Path -LiteralPath $accountHome)) {
+    New-Item -ItemType Directory -Path $accountHome -Force | Out-Null
 }
-if (-not (Test-Path -LiteralPath $profile.Home -PathType Container)) {
-    throw ('Failed to create CODEX_HOME: {0}' -f $profile.Home)
+if (-not (Test-Path -LiteralPath $accountHome -PathType Container)) {
+    throw ('Failed to create CODEX_HOME: {0}' -f $accountHome)
 }
 
 $hadPreviousCodexHome = Test-Path Env:CODEX_HOME
 $previousCodexHome = $env:CODEX_HOME
-$env:CODEX_HOME = $profile.Home
+$env:CODEX_HOME = $accountHome
 $credentialOverride = 'cli_auth_credentials_store="file"'
+
+# A CLI launched from Codex Desktop inherits the parent task's managed
+# permission profile and can reject even local reads with approval_policy=never
+# and sandbox=read-only. Clear nested-session markers while this isolated CLI
+# runs, then restore the parent environment when it exits.
+$nestedCodexEnvNames = @(
+    'CODEX_APP_TOOLS_PIPE_PATH',
+    'CODEX_CI',
+    'CODEX_INTERNAL_ORIGINATOR_OVERRIDE',
+    'CODEX_SESSION_ID',
+    'CODEX_THREAD_ID'
+)
+$previousNestedCodexEnv = @{}
+foreach ($name in $nestedCodexEnvNames) {
+    $envPath = 'Env:{0}' -f $name
+    if (Test-Path -LiteralPath $envPath) {
+        $previousNestedCodexEnv[$name] = (Get-Item -LiteralPath $envPath).Value
+        Remove-Item -LiteralPath $envPath
+    }
+}
 
 function Get-CodexAuthEmail {
     param([string]$CodexHome)
@@ -83,11 +107,11 @@ function Get-CodexAuthEmail {
 }
 
 function Test-ExpectedAccount {
-    $actualEmail = Get-CodexAuthEmail -CodexHome $profile.Home
+    $actualEmail = Get-CodexAuthEmail -CodexHome $accountHome
     if (-not $actualEmail) {
         return [pscustomobject]@{ IsMatch = $false; Email = $null; Reason = 'missing' }
     }
-    if ($actualEmail -ne $profile.Email) {
+    if ($actualEmail -ne $accountEmail) {
         return [pscustomobject]@{ IsMatch = $false; Email = $actualEmail; Reason = 'mismatch' }
     }
     return [pscustomobject]@{ IsMatch = $true; Email = $actualEmail; Reason = 'ok' }
@@ -98,8 +122,8 @@ function Write-AccountHeader {
 
     Write-Host ''
     Write-Host ('=' * 68) -ForegroundColor $Color
-    Write-Host (' CODEX {0}: {1}' -f $profile.Label, $profile.Email) -ForegroundColor $Color
-    Write-Host (' CODEX_HOME: {0}' -f $profile.Home) -ForegroundColor DarkGray
+    Write-Host (' CODEX {0}: {1}' -f $accountLabel, $accountEmail) -ForegroundColor $Color
+    Write-Host (' CODEX_HOME: {0}' -f $accountHome) -ForegroundColor DarkGray
     Write-Host ('=' * 68) -ForegroundColor $Color
     Write-Host ''
 }
@@ -113,11 +137,11 @@ try {
         }
 
         if ($state.Reason -eq 'mismatch') {
-            Write-Host ('Account mismatch: expected {0}, found {1}' -f $profile.Email, $state.Email) -ForegroundColor Red
+            Write-Host ('Account mismatch: expected {0}, found {1}' -f $accountEmail, $state.Email) -ForegroundColor Red
             return
         }
 
-        Write-Host ('No file-based login found for {0} in {1}' -f $profile.Email, $profile.Home) -ForegroundColor Red
+        Write-Host ('No file-based login found for {0} in {1}' -f $accountEmail, $accountHome) -ForegroundColor Red
         return
     }
 
@@ -171,7 +195,7 @@ try {
         $state = Test-ExpectedAccount
         if (-not $state.IsMatch) {
             $found = if ($state.Email) { $state.Email } else { 'unknown account' }
-            Write-Host ('Login rejected: expected {0}, found {1}. Start again and choose the correct account.' -f $profile.Email, $found) -ForegroundColor Red
+            Write-Host ('Login rejected: expected {0}, found {1}. Start again and choose the correct account.' -f $accountEmail, $found) -ForegroundColor Red
             return
         }
     }
@@ -180,6 +204,16 @@ try {
     & codex -c $credentialOverride @CodexArgs
 }
 finally {
+    foreach ($name in $nestedCodexEnvNames) {
+        $envPath = 'Env:{0}' -f $name
+        if ($previousNestedCodexEnv.ContainsKey($name)) {
+            Set-Item -LiteralPath $envPath -Value $previousNestedCodexEnv[$name]
+        }
+        else {
+            Remove-Item -LiteralPath $envPath -ErrorAction SilentlyContinue
+        }
+    }
+
     if ($hadPreviousCodexHome) {
         $env:CODEX_HOME = $previousCodexHome
     }

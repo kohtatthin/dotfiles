@@ -59,13 +59,13 @@ if is_windows then
     -- 2026-08-17: 会社アカウント一本化。agy のログイン情報は Windows 資格情報マネージャー（keyring）の
     --   1枠に保存され、USERPROFILE/HOME を差し替えても同じアカウントで認証される（実機確認）。
     --   Codex のような個人/会社の同時併用はできないため、エントリは会社用の1本だけにする。
-    { id = 'antigravity', label = 'Antigravity CLI (会社)', cmd = '$env:PATH = "$env:LOCALAPPDATA\\agy\\bin;$env:PATH"; cd C:\\claude; agy' },
+    { id = 'antigravity', label = 'Antigravity CLI (会社 / Auto)', cmd = '$env:PATH = "$env:LOCALAPPDATA\\agy\\bin;$env:PATH"; cd C:\\claude; agy --mode accept-edits --dangerously-skip-permissions' },
     { id = 'lazygit',    label = 'lazygit',           cmd = 'cd $HOME\\dotfiles; lazygit' },
     { id = 'dashboard',  label = 'Todoist',            cmd = '& $HOME\\dotfiles\\wezterm\\todoist.ps1' },
     { id = 'calendar',   label = '📅 カレンダー',        cmd = '& $HOME\\dotfiles\\wezterm\\calendar.ps1' },
     -- Codexはデスクトップ既定(~/.codex)と分離し、起動前にメールアドレスまで検証する。
     -- 会社=~/.codex-work / 個人=~/.codex-personal。誤アカウントではCodexを起動しない。
-    { id = 'codex',      label = 'Codex CLI (会社)',    cmd = 'cd C:\\claude; & "$HOME\\dotfiles\\wezterm\\codex-account.ps1" -Account work' },
+    { id = 'codex',      label = 'Codex CLI (会社 / Auto)', cmd = 'cd C:\\claude; & "$HOME\\dotfiles\\wezterm\\codex-account.ps1" -Account work --approve-for-me' },
     { id = 'codex-personal', label = 'Codex CLI (個人)', cmd = 'cd C:\\claude; & "$HOME\\dotfiles\\wezterm\\codex-account.ps1" -Account personal' },
     -- AI委譲キューはペイン注入ではなく、必要時だけ会社Claudeを非対話起動する。WezTerm常駐には依存しない。
     { id = 'delegate-queue', label = '📨 AI委譲キュー', cmd = 'cd C:\\claude; ai-delegate watch' },
@@ -134,44 +134,12 @@ for _, app in ipairs(launcher_apps) do
   launcher_cmds[app.id] = app.cmd
 end
 
--- 7ペインレイアウトで最大化起動（2026-06-17 役割ベースに再編 / 左カラム3分割）
--- 比率 = 左2 : 中4 : 右4 / 高さは上下等分（bottom_ratio=0.5）
---
--- ===================================================================
--- ★ ペイン番号呼称（このマシンの公式呼び方。会話・指示はこの番号で統一）
--- ===================================================================
---   ⑦
---   ⑥　①　②
---   ⑤　④　③
---
---   ①〜⑦の具体的な役割はOS別の図を参照（位置番号は両OS共通）
---   ※「左上／右下」等の位置呼びは廃止。必ず番号（①〜⑦）で呼ぶこと。
---
--- ===== Windows: Herdr管理体制（2026-08-20〜） =====
---   WezTerm起動 → 別ウィンドウで herdr-bootstrap.ps1 → HerdrがAIプロセスを所有。
---   7ペインのウィンドウは従来どおり構築する（⑤=Herdr Cockpit, ⑥=カレンダー, ⑦=Todoist,
---   ①〜④=AIを各ペインで直接起動）。※①〜④はHerdr管理下のAIとは別プロセスなので、
---     同じ役割のAIが二重に立ち上がる。整理する場合はペイン側をHerdrへのattachに変えること。
---   AIの実体は Herdr の3ワークスペースにある:
---     Core Agents (w1): ①Commander(会社Claude), ②Codex Sol(個人), ③Codex Luna(会社), ④Jikko(個人Claude, Opus 4.6)
---     Extra Agents (w2): Grok, Antigravity, Claude Extra(会社), Local LLM Extra
---     Local LLM   (w3): LFM 2.5 (opencode)
---   F9ランチャーはHerdr管理外で現在ペインにAIを直接起動する（コックピット非表示）。
--- =================================================================
---
--- Windows（左カラムだけ3分割。図中の丸数字が上記の番号）:
--- ┌──────────┬────────────────────┬──────────────────┐
--- │⑦Todoist  │① 司令／壁打ち(会社) │② Codex Sol(個人)  │
--- ├──────────┤                    │    レビュー        │
--- │⑥カレンダー│────────────────────│──────────────────│
--- ├──────────┤④ Jikko (個人Claude) │③ Codex Luna(会社) │
--- │⑤agmsg    │   Opus 4.6固定     │    ワーカー        │
--- └──────────┴────────────────────┴──────────────────┘
---   左 = ⑦Todoist / ⑥カレンダー / ⑤Herdr Cockpit（細い列・3分割）
---   中 = 上=①会社Claude司令/壁打ち, 下=④Jikko(個人Claude, Opus 4.6固定)
---   右 = 上=②Codex Sol(個人/レビュー), 下=③Codex Luna(会社/ワーカー)
---   AIの実体はHerdr管理下（上記ワークスペース参照）。WezTermペインは情報表示用。
--- Mac（個人アカウント中心。③だけ会社Claudeを常駐。実行・検証Shellは F9）:
+-- ===== レイアウト =====
+-- Windows: Herdr TUI をフルウィンドウで起動。Herdr側の左ペインでワークスペース切替、
+--   右側にAIペインが表示される。AIプロセスはすべてHerdr管理下。
+--   herdr-bootstrap.ps1 がサーバー起動→ワークスペース/ペイン構成→エージェント起動を行い、
+--   完了後に herdr（引数なし）でTUIクライアントを起動する。
+-- Mac: 従来の7ペインレイアウト（Herdr未対応）。
 -- ┌──────────┬────────────────────┬──────────────────┐
 -- │⑦Todoist  │① Claude 司令／壁打ち│② Codex (レビュー) │
 -- ├──────────┤                    │                  │
@@ -179,99 +147,54 @@ end
 -- ├──────────┤④ Grok Build (実装) │③ Claude Code (会社)│
 -- │⑤lazygit  │                    │                  │
 -- └──────────┴────────────────────┴──────────────────┘
---   ※ Gemini / yazi / Shell は常駐から外し F9 ランチャーで随時起動
 wezterm.on('gui-startup', function(cmd)
-  -- Herdrブートストラップ(-ConfigureOnly)をバックグラウンドで実行。
-  -- Cockpit UI は左下ペインで herdr-status.ps1 経由で表示する。
-  if is_windows and not cmd then
-    local log = wezterm.home_dir .. '\\AppData\\Local\\herdr\\bootstrap.log'
-    wezterm.background_child_process {
-      'powershell.exe', '-ExecutionPolicy', 'Bypass',
-      '-Command',
-      '& "' .. herdr_bootstrap .. '" -ConfigureOnly *> "' .. log .. '"',
-    }
-  end
-
   local tab, pane, window = mux.spawn_window(cmd or {})
   window:gui_window():maximize()
 
-  -- 最大化後の実サイズに対して分割する。
-  wezterm.time.call_after(0.2, function()
-    local bottom_ratio = 0.5  -- 上下等分（2026-06-17）
+  if is_windows then
+    -- Herdr TUI をフルウィンドウで起動。
+    -- bootstrap がサーバー起動・ワークスペース構成・エージェント起動を行い、
+    -- 完了後に herdr TUI が立ち上がる（-ConfigureOnly なし = TUI起動まで行う）。
+    pane:send_text('& "' .. herdr_bootstrap .. '"\r\n')
+  else
+    -- Mac: 従来の7ペインレイアウト
+    wezterm.time.call_after(0.2, function()
+      local bottom_ratio = 0.5
 
-    -- 1) 右カラムを切り出し (左:中:右 = 2:4:4 の右4/10)
-    local right_pane = pane:split {
-      direction = 'Right',
-      size = 4 / 10,
-    }
+      local right_pane = pane:split {
+        direction = 'Right',
+        size = 4 / 10,
+      }
+      local middle_pane = pane:split {
+        direction = 'Right',
+        size = 2 / 3,
+      }
+      local left_mid = pane:split {
+        direction = 'Bottom',
+        size = 2 / 3,
+      }
+      local left_bottom = left_mid:split {
+        direction = 'Bottom',
+        size = 1 / 2,
+      }
+      local middle_bottom = middle_pane:split {
+        direction = 'Bottom',
+        size = bottom_ratio,
+      }
+      local right_bottom = right_pane:split {
+        direction = 'Bottom',
+        size = bottom_ratio,
+      }
 
-    -- 2) 残りから中央ペインを切り出し (左:中 = 2:4 の中2/3)
-    local middle_pane = pane:split {
-      direction = 'Right',
-      size = 2 / 3,
-    }
-
-    -- 3) 各カラムを上下分割。左カラムだけ3分割（上=Todoist / 中=カレンダー / 下=AI委譲キュー）
-    local left_mid = pane:split {
-      direction = 'Bottom',
-      size = 2 / 3,   -- pane=左上(1/3), left_mid=下2/3
-    }
-    local left_bottom = left_mid:split {
-      direction = 'Bottom',
-      size = 1 / 2,   -- left_mid=左中(1/3), left_bottom=左下(1/3)
-    }
-
-    local middle_bottom = middle_pane:split {
-      direction = 'Bottom',
-      size = bottom_ratio,
-    }
-
-    local right_bottom = right_pane:split {
-      direction = 'Bottom',
-      size = bottom_ratio,
-    }
-
-    -- 各ペインでコマンド実行（役割ベース。Windows/Macでアカウント構成だけ分岐）
-
-    if is_windows then
-      -- ⑦ 左上: タスク管理ボード（Todoist）
-      pane:send_text('& $HOME\\dotfiles\\wezterm\\todoist.ps1\r\n')
-      -- ⑥ 左中: カレンダー（calendar.ps1。暫定=月表示 → 後日 Google Calendar 連携へ中身を差し替え）
-      left_mid:send_text('& $HOME\\dotfiles\\wezterm\\calendar.ps1\r\n')
-      -- ⑤ 左下: ブートストラップ完了を待ってからHerdr本体(メニューUI)を起動。
-      left_bottom:send_text('do { Start-Sleep -Milliseconds 500 } until (& "' .. herdr_exe .. '" status server 2>$null; $?); & "' .. herdr_exe .. '"\r\n')
-      -- ① 中上: 司令／壁打ち（会社Claude）。CLAUDE_CONFIG_DIR=.claude を明示。
-      -- AGMSG_AGENT は agmsg v2 の identity。①②は project も type も同一のため、
-      -- 推論ではなくここで固定する（旧agmsgのidentity衝突を構造的に回避）。
-      middle_pane:send_text('cd C:\\claude; $env:CLAUDE_CONFIG_DIR = "$HOME\\.claude"; $env:AGMSG_AGENT = "commander"; claude --name commander\r\n')
-      -- ④ 中下: Jikko（個人Claude, Opus 4.6固定）。フォローアップ・パーソナル枠。
-      -- 性格は ~/.claude-personal/CLAUDE.md で定義（実行増幅器スタイル）。
-      -- Antigravity / Grok はトークン温存のため常駐せず、F9ランチャーで随時起動。
-      middle_bottom:send_text('cd C:\\claude; $env:CLAUDE_CONFIG_DIR = "$HOME\\.claude-personal"; $env:AGMSG_AGENT = "jikko"; claude --model claude-opus-4-6 --name jikko\r\n')
-      -- ② 右上: Codex Sol（個人アカウント、レビュー担当）。
-      right_pane:send_text('cd C:\\claude; $env:AGMSG_AGENT = "codex-sol"; & "$HOME\\dotfiles\\wezterm\\codex-account.ps1" -Account personal\r\n')
-      -- ③ 右下: Codex Luna（会社アカウント、ワーカー担当）。
-      right_bottom:send_text('cd C:\\claude; $env:AGMSG_AGENT = "codex-luna"; & "$HOME\\dotfiles\\wezterm\\codex-account.ps1" -Account work\r\n')
-    else
-      -- Mac: ①個人Claudeで考える → ④Grokで作る → ③会社Claudeで動かす → ②Codexでレビュー
-      -- send_text は Enter を \r で送る（\n だけだとプロンプトに文字が残って実行されないことがある）
-      -- ⑦ 左上: Todoist
       pane:send_text('bash ~/dotfiles/wezterm/todoist.sh\r')
-      -- ⑥ 左中: カレンダー
       left_mid:send_text('cal\r')
-      -- ⑤ 左下: lazygit（Macでは軽量な常駐Gitビューとして維持）
       left_bottom:send_text('cd ~/dotfiles && lazygit\r')
-      -- ① 中上: 個人Claudeの司令／壁打ち
       middle_pane:send_text('claude\r')
-      -- ④ 中下: Grok Buildの実装ワーカー
       middle_bottom:send_text('cd ~/claude && grok\r')
-      -- ② 右上: Codexレビュー
       right_pane:send_text('cd ~/claude && codex\r')
-      -- ③ 右下: 会社Claude。CLAUDE_CONFIG_DIR=~/.claude-work を明示（個人の ~/.claude と分離）。
-      -- 2026-08-16: 実行・検証Shellをここに置いていたが、会社用Claude常駐に差し替え。Shellは F9。
       right_bottom:send_text('cd ~/claude && CLAUDE_CONFIG_DIR=~/.claude-work claude --model opus\r')
-    end
-  end)
+    end)
+  end
 end)
 
 -- カスタムカラースキーム
@@ -891,6 +814,16 @@ config.keys = {
       end),
     },
   },
+  -- Herdr workspace switch: Ctrl+Shift+1/2/3 で Core/Extra/Local LLM を切替
+  { key = '1', mods = 'CTRL|SHIFT', action = wezterm.action_callback(function()
+    wezterm.background_child_process { herdr_exe, 'workspace', 'focus', 'w1' }
+  end) },
+  { key = '2', mods = 'CTRL|SHIFT', action = wezterm.action_callback(function()
+    wezterm.background_child_process { herdr_exe, 'workspace', 'focus', 'w2' }
+  end) },
+  { key = '3', mods = 'CTRL|SHIFT', action = wezterm.action_callback(function()
+    wezterm.background_child_process { herdr_exe, 'workspace', 'focus', 'w3' }
+  end) },
   -- Launcher menu: アプリ切り替え
   -- Win/Mac とも F9。Mac では Mission Control 等に F9 を奪われやすいので
   -- Cmd+Shift+9 も同じメニューに割り当てる（テーマ系の Mac 代替と同じ方針）。
