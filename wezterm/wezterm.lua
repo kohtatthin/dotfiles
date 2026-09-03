@@ -163,32 +163,31 @@ for _, app in ipairs(launcher_apps) do
   launcher_cmds[app.id] = app.cmd
 end
 
--- ===== レイアウト（2026-08-31 統合: Windows / Mac とも Herdr TUI フルウィンドウ） =====
+-- ===== レイアウト（2026-09-03: WezTerm は Herdr を表示する薄い箱） =====
 -- WezTerm は分割せず、唯一のペインで Herdr 本体(TUI)を全画面起動する。
 -- レイアウトもワークスペース切替も Herdr 自身が持つ（サイドバーの spaces をクリック）。
 -- ┌────────┬──────────────────────────────────────────┐
 -- │ spaces │  フォーカス中ワークスペースのエージェント群 │
--- │ Core   │  （Herdr が 2x2 等に自動レイアウト）        │
--- │ Review │                                          │
+-- │Control │  （Herdr が 2x2 等に自動レイアウト）        │
+-- │ 🦍 Exec │                                          │
 -- │ Extra  │  切り替えはサイドバーの spaces をクリック    │
 -- └────────┴──────────────────────────────────────────┘
 --   起動時に herdr-bootstrap（-ConfigureOnly / --configure-only）をバックグラウンドで走らせ、
 --   サーバー起動→ワークスペース/ペイン構成→エージェント起動まで行う。
 --   その完了をペイン側で待ってから herdr TUI クライアントを起動する。
---   Herdrのワークスペース（herdr-bootstrap が構築。2026-08-31 v2再編で Win/Mac 統一）:
---     w1 Core Agents   : Claude Work - Commander / Codex Personal - Plan/Build /
---                        Claude Personal - Utility / Codex Work - Luna（2x2）
---     w2 Review Agents : Claude Work - Review A/B/C/D（2x2。4枠すべて会社アカウント）
---     w3 Extra Agents  : Grok / Antigravity CLI / Claude Work - Extra /
+--   Herdrのワークスペース（herdr-bootstrap が構築）:
+--     w1 CONTROL / ENTRY : Commander / Sol / Utility / Status（2x2）
+--     w2 🦍 EXECUTION    : Supervisor / Reviewer A / Worker A / Worker B（2x2）
+--     w3 Extra            : Grok / Antigravity CLI / Claude Work - Extra /
 --                        Local LLM - Extra（Win）または Codex - Extra（Mac）（2x2）
 --     w4 Local LLM     : LFM/Qwen/Gemma/Nemotron スロット（Windows のみ）
---   ※ REVIEW はレビュー専任。依頼は CORE のセッションから直接せず、
---      handoff / ai-delegate 経由で渡す（実装セッションに自分の成果をレビューさせない）。
+--   ※ 相談窓口は Commander。実行は Task Packet を pending へ投入して Supervisor に渡す。
+--      Supervisorへ直接相談せず、Supervisor自身も成果物を作らない。
 --   ※ Mac の Local LLM ワークスペースは LM Studio / opencode 未導入のため作らない。
 --   ※ Extra を常駐させたくないときは herdr-bootstrap に --skip-extra / -SkipExtra を渡す。
---      REVIEW を常駐させたくないときは --skip-review / -SkipReview を渡す。
+--      Reviewer A を常駐させたくないときは --skip-review / -SkipReview を渡す。
 --   ※ ワークスペース番号は herdr の作成順で決まる（並べ替えコマンドが無い）。
---      既存セッションに後から REVIEW を足すと末尾に付くため、番号どおりに
+--      既存セッションへ後から追加すると末尾に付くため、番号どおりに
 --      並べたい場合は herdr server を作り直してから bootstrap を走らせる。
 --   ※ Todoist / カレンダー / yazi / lazygit / Shell は F9 ランチャーで随時起動する。
 --      F9ランチャーはHerdr管理外で、現在ペインにアプリを直接起動する。

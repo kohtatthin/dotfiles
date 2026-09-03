@@ -1,7 +1,8 @@
 ﻿param(
     [switch]$ConfigureOnly,
     [switch]$SkipLocal,
-    [switch]$SkipReview
+    [switch]$SkipReview,
+    [switch]$SkipExtra
 )
 
 $ErrorActionPreference = 'Stop'
@@ -15,19 +16,24 @@ $herdrExe = Join-Path $env:LOCALAPPDATA 'Programs\Herdr\bin\herdr.exe'
 $codexAccountScript = Join-Path $env:USERPROFILE 'dotfiles\wezterm\codex-account.ps1'
 $workRoot = 'C:\claude'
 
-# ワークスペースは「番号順 = この並び順」で扱う（2026-08-31 v2再編）。
-#   w1 CORE   : 常用4枠
-#   w2 REVIEW : 会社CCによる並列レビュー専用4枠
+# ワークスペースは「番号順 = この並び順」で扱う（2026-09-03 Loop再編）。
+#   w1 CONTROL / ENTRY : 相談・企画・Task Packet作成の4枠
+#   w2 🦍 EXECUTION    : Supervisor / Reviewer A / Worker A / Worker B
 #   w3 EXTRA  : 予備枠
 #   w4 Local LLM
 # herdr には並べ替えコマンドが無く、番号は作成順で決まる。新規セッションでは
 # この順に作られ、既存セッションでは不足分が末尾に追加される。
 $workspacePlan = @(
-    'Core Agents',
-    'Review Agents',
-    'Extra Agents',
+    'CONTROL / ENTRY',
+    '🦍 EXECUTION',
+    'Extra',
     'Local LLM'
 )
+$legacyWorkspaceLabels = @{
+    'CONTROL / ENTRY' = 'Core Agents'
+    '🦍 EXECUTION'    = 'Review Agents'
+    'Extra'           = 'Extra Agents'
+}
 
 function Get-HerdrJson {
     param([string[]]$Arguments)
@@ -81,6 +87,21 @@ function Resolve-Workspaces {
         $match = $existing | Where-Object label -eq $label | Select-Object -First 1
         if ($match) {
             $resolved[$label] = $match.workspace_id
+            continue
+        }
+
+        # 旧役割名は位置ではなくラベルで移行する。既存環境ではReview Agentsが
+        # w4にある場合があり、位置採用するとExtra Agentsを誤転用するため。
+        $legacyLabel = $legacyWorkspaceLabels[$label]
+        $legacy = $existing | Where-Object label -eq $legacyLabel | Select-Object -First 1
+        if ($legacy) {
+            Write-Host "Renaming workspace: $legacyLabel -> $label" -ForegroundColor Cyan
+            & $herdrExe workspace rename $legacy.workspace_id $label | Out-Null
+            if ($LASTEXITCODE -ne 0) {
+                throw "Failed to rename workspace: $($legacy.workspace_id)"
+            }
+            $legacy.label = $label
+            $resolved[$label] = $legacy.workspace_id
             continue
         }
 
@@ -219,28 +240,28 @@ function Start-AgentIfMissing {
 Start-HerdrServer
 
 $workspaces = Resolve-Workspaces
-$core   = $workspaces['Core Agents']
-$review = $workspaces['Review Agents']
-$extra  = $workspaces['Extra Agents']
+$control   = $workspaces['CONTROL / ENTRY']
+$execution = $workspaces['🦍 EXECUTION']
+$extra     = $workspaces['Extra']
 $local  = $workspaces['Local LLM']
 
-# CORE: 配置は現状維持。2026-08-31 に個人CCを Utility、個人Codex を Plan/Build へ改称。
-Initialize-PaneGrid $core 4
-Set-PaneLabels $core @(
-    'Claude Work - Commander',
-    'Codex Personal - Plan/Build',
-    'Claude Personal - Utility',
-    'Codex Work - Luna'
+# CONTROL / ENTRY: 相談窓口とTask Packet作成。CommanderはSupervisorではない。
+Initialize-PaneGrid $control 4
+Set-PaneLabels $control @(
+    'Commander - Claude Work / Opus 5',
+    'Sol - Codex Personal / GPT-5.6 Sol',
+    'Utility - Claude Personal',
+    'Status - Shell'
 )
 
-# REVIEW: 4枠すべて会社アカウント。並列レビュー前提（2026-08-31 新設）。
-# 実装セッションに自分の成果をレビューさせないため、依頼は handoff / ai-delegate 経由で渡す。
-Initialize-PaneGrid $review 4
-Set-PaneLabels $review @(
-    'Claude Work - Review A',
-    'Claude Work - Review B',
-    'Claude Work - Review C',
-    'Claude Work - Review D'
+# EXECUTION: 入力はTask Packetのみ。Supervisorは実装・文章生成をせずWorkerへ委譲する。
+# MVPは1 Loopずつ処理し、ReviewerはAのみ。Reviewer BやLuna Workerは置かない。
+Initialize-PaneGrid $execution 4
+Set-PaneLabels $execution @(
+    'Supervisor - Claude Work / Opus 5',
+    'Reviewer A - Claude Work / Opus 5',
+    'Worker A - Gemini 3.8 Flash',
+    'Worker B - Claude Work / Sonnet 5'
 )
 
 # EXTRA: 構成変更なし（w2 から w3 へ繰り下げのみ）
@@ -259,49 +280,65 @@ Set-PaneLabels $local @('Local LLM slot (LFM/Qwen/Gemma/Nemotron)')
 $liveAgentPaneIds = Get-LiveAgentPaneIds
 $userRoot = $env:USERPROFILE
 
-$claudeWork = "Set-Item Env:CLAUDE_CONFIG_DIR $userRoot\.claude; Set-Item Env:AGMSG_AGENT commander; Set-Location C:\claude; claude --name commander"
-$claudePersonal = "Set-Item Env:CLAUDE_CONFIG_DIR $userRoot\.claude-personal; Set-Item Env:AGMSG_AGENT jikko; Set-Location C:\claude; claude --model claude-opus-4-6 --name jikko"
+$claudeWork = "Set-Item Env:CLAUDE_CONFIG_DIR $userRoot\.claude; Set-Item Env:AGMSG_AGENT commander; Set-Location C:\claude; claude --model opus --name commander"
+$claudePersonal = "Set-Item Env:CLAUDE_CONFIG_DIR $userRoot\.claude-personal; Set-Item Env:AGMSG_AGENT utility; Set-Location C:\claude; claude --name utility"
 $codexPersonal = "Set-Item Env:AGMSG_AGENT codex-sol; Set-Location C:\claude; & $codexAccountScript -Account personal"
-$codexWork = "Set-Item Env:AGMSG_AGENT codex-luna; Set-Location C:\claude; & $codexAccountScript -Account work"
 $claudeWorkExtra = "Set-Item Env:CLAUDE_CONFIG_DIR $userRoot\.claude; Set-Item Env:AGMSG_AGENT claude-extra; Set-Location C:\claude; claude --name claude-extra"
 $grok = 'Set-Location C:\claude; grok'
 $antigravity = "Set-Location C:\claude; & $userRoot\AppData\Local\agy\bin\agy.exe"
+$loopSupervisor = "Set-Item Env:CLAUDE_CONFIG_DIR $userRoot\.claude; Set-Item Env:AGMSG_AGENT loop-supervisor; Set-Location C:\claude; claude --model opus --name loop-supervisor"
+$loopReviewer = "Set-Item Env:CLAUDE_CONFIG_DIR $userRoot\.claude; Set-Item Env:AGMSG_AGENT loop-review-a; Set-Location C:\claude; claude --model opus --name loop-review-a"
+$loopWorkerGemini = "Set-Item Env:AGMSG_AGENT loop-worker-gemini; Set-Location C:\claude; & $userRoot\AppData\Local\agy\bin\agy.exe --model gemini-3.8-flash-medium --mode accept-edits --dangerously-skip-permissions"
+$loopWorkerSonnet = "Set-Item Env:CLAUDE_CONFIG_DIR $userRoot\.claude; Set-Item Env:AGMSG_AGENT loop-worker-sonnet; Set-Location C:\claude; claude --model sonnet --name loop-worker-sonnet"
 $localLlm = 'lms server start; lms unload --all; lms load lfm2.5-2.6b --context-length 32768 --yes; Set-Location C:\claude; opencode --model lmstudio/lfm2.5-2.6b'
 $localLlmExtra = 'Set-Location C:\claude; opencode --model lmstudio/lfm2.5-2.6b'
 
-# REVIEW枠はすべて会社プロファイル（CLAUDE_CONFIG_DIR = $userRoot\.claude）。
-function Get-ReviewCommand {
-    param([string]$Slot)
-
-    $name = "review-$($Slot.ToLower())"
-    return "Set-Item Env:CLAUDE_CONFIG_DIR $userRoot\.claude; Set-Item Env:AGMSG_AGENT $name; Set-Location C:\claude; claude --name $name"
-}
-
-# --- CORE ---
-Start-AgentIfMissing (Get-PaneByLabel $core 'Claude Work - Commander') $claudeWork 'Claude Work - Commander' $liveAgentPaneIds
-Start-AgentIfMissing (Get-PaneByLabel $core 'Codex Personal - Plan/Build') $codexPersonal 'Codex Personal - Plan/Build' $liveAgentPaneIds
-Start-AgentIfMissing (Get-PaneByLabel $core 'Claude Personal - Utility') $claudePersonal 'Claude Personal - Utility' $liveAgentPaneIds
-Start-AgentIfMissing (Get-PaneByLabel $core 'Codex Work - Luna') $codexWork 'Codex Work - Luna' $liveAgentPaneIds
-
-# --- REVIEW ---
-if (-not $SkipReview) {
-    foreach ($slot in @('A', 'B', 'C', 'D')) {
-        $label = "Claude Work - Review $slot"
-        Start-AgentIfMissing (Get-PaneByLabel $review $label) (Get-ReviewCommand $slot) $label $liveAgentPaneIds
+# --- CONTROL / ENTRY ---
+Start-AgentIfMissing (Get-PaneByLabel $control 'Commander - Claude Work / Opus 5') $claudeWork 'Commander' $liveAgentPaneIds
+Start-AgentIfMissing (Get-PaneByLabel $control 'Sol - Codex Personal / GPT-5.6 Sol') $codexPersonal 'Sol' $liveAgentPaneIds
+Start-AgentIfMissing (Get-PaneByLabel $control 'Utility - Claude Personal') $claudePersonal 'Utility' $liveAgentPaneIds
+# Status: Multi-Entry Loop Inbox の Receiver（loop_intake.py watch）を常駐させる（2026-09-03）。
+# エージェントではないので agent list に出ない。起動済み判定は watch の lock（~/.agents/loop-inbox/watch.lock.json、
+# PID + heartbeat）を見る `watch-status`（稼働中なら exit 0）で行う。Herdr の pane process-info は子プロセス（python）を
+# foreground に出さないため使えない（2026-09-03 実機確認）。watch 自体も同じ lock で二重起動を拒否する。
+$loopIntakeScript = Join-Path $workRoot 'loop-inbox\loop_intake.py'
+$statusPane = Get-PaneByLabel $control 'Status - Shell'
+if ($statusPane -and (Test-Path $loopIntakeScript)) {
+    & py -3.13 $loopIntakeScript watch-status *> $null
+    if ($LASTEXITCODE -eq 0) {
+        Write-Host 'Already running: Loop Inbox Receiver (watch)' -ForegroundColor DarkGray
+    } else {
+        Write-Host 'Starting: Loop Inbox Receiver (watch)' -ForegroundColor Cyan
+        & $herdrExe pane run $statusPane.pane_id "Set-Location $workRoot; py -3.13 $loopIntakeScript watch --interval 30"
+        if ($LASTEXITCODE -ne 0) {
+            throw 'Failed to start: Loop Inbox Receiver'
+        }
     }
 }
 
+# --- EXECUTION ---
+Start-AgentIfMissing (Get-PaneByLabel $execution 'Supervisor - Claude Work / Opus 5') $loopSupervisor 'Supervisor' $liveAgentPaneIds
+if (-not $SkipReview) {
+    Start-AgentIfMissing (Get-PaneByLabel $execution 'Reviewer A - Claude Work / Opus 5') $loopReviewer 'Reviewer A' $liveAgentPaneIds
+}
+Start-AgentIfMissing (Get-PaneByLabel $execution 'Worker A - Gemini 3.8 Flash') $loopWorkerGemini 'Worker A - Gemini 3.8 Flash' $liveAgentPaneIds
+Start-AgentIfMissing (Get-PaneByLabel $execution 'Worker B - Claude Work / Sonnet 5') $loopWorkerSonnet 'Worker B - Sonnet 5' $liveAgentPaneIds
+
 # --- EXTRA ---
-Start-AgentIfMissing (Get-PaneByLabel $extra 'Grok') $grok 'Grok' $liveAgentPaneIds
-Start-AgentIfMissing (Get-PaneByLabel $extra 'Antigravity CLI') $antigravity 'Antigravity CLI' $liveAgentPaneIds
-Start-AgentIfMissing (Get-PaneByLabel $extra 'Claude Work - Extra') $claudeWorkExtra 'Claude Work - Extra' $liveAgentPaneIds
+if (-not $SkipExtra) {
+    Start-AgentIfMissing (Get-PaneByLabel $extra 'Grok') $grok 'Grok' $liveAgentPaneIds
+    Start-AgentIfMissing (Get-PaneByLabel $extra 'Antigravity CLI') $antigravity 'Antigravity CLI' $liveAgentPaneIds
+    Start-AgentIfMissing (Get-PaneByLabel $extra 'Claude Work - Extra') $claudeWorkExtra 'Claude Work - Extra' $liveAgentPaneIds
+}
 
 if (-not $SkipLocal) {
     Start-AgentIfMissing (Get-PaneByLabel $local 'Local LLM slot (LFM/Qwen/Gemma/Nemotron)') $localLlm 'Local LLM - LFM 2.5' $liveAgentPaneIds
-    Start-AgentIfMissing (Get-PaneByLabel $extra 'Local LLM - Extra') $localLlmExtra 'Local LLM - Extra' $liveAgentPaneIds
+    if (-not $SkipExtra) {
+        Start-AgentIfMissing (Get-PaneByLabel $extra 'Local LLM - Extra') $localLlmExtra 'Local LLM - Extra' $liveAgentPaneIds
+    }
 }
 
-& $herdrExe workspace focus $core | Out-Null
+& $herdrExe workspace focus $control | Out-Null
 
 if (-not $ConfigureOnly) {
     & $herdrExe

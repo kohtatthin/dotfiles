@@ -1,15 +1,15 @@
 #!/bin/bash
 # herdr-bootstrap.sh — Mac版 Herdr ブートストラップ
-# Windows の herdr-bootstrap.ps1 と同等の構成（2026-08-31 v2再編で Windows 準拠へ統一）。
+# Windows の herdr-bootstrap.ps1 と同じ役割構成。Mac固有の既存差異は維持する。
 # WezTerm gui-startup からバックグラウンド実行される。
 # 用法: herdr-bootstrap.sh [--configure-only] [--skip-extra] [--skip-review]
 #
-#   w1 CORE   : 常用4枠
-#   w2 REVIEW : 会社CCによる並列レビュー専用4枠（新設）
+#   w1 CONTROL / ENTRY : 相談・企画・Task Packet作成の4枠
+#   w2 🦍 EXECUTION    : Supervisor / Reviewer A / Worker A / Worker B
 #   w3 EXTRA  : 予備枠
 #
-# レビュー依頼は CORE のセッションから直接行わず、handoff / ai-delegate 経由で
-# REVIEW 枠へ渡す（実装セッションに自分の成果をレビューさせない）。
+# CommanderはSupervisorではない。実行LoopへはTask Packetをpendingへ投入して渡す。
+# Supervisorへの直接相談と、Supervisor自身による成果物作成は禁止する。
 
 set -euo pipefail
 
@@ -50,7 +50,15 @@ CODEX_ACCOUNT_SCRIPT="$HOME/dotfiles/wezterm/codex-account.sh"
 # ワークスペースは「番号順 = この並び順」で扱う。herdr には並べ替えコマンドが無く、
 # 番号は作成順で決まる。新規セッションではこの順に作られ、既存セッションでは
 # 不足分が末尾に追加される（順番を正すには herdr server の作り直しが要る）。
-WORKSPACE_PLAN=('Core Agents' 'Review Agents' 'Extra Agents')
+WORKSPACE_PLAN=('CONTROL / ENTRY' '🦍 EXECUTION' 'Extra')
+
+legacy_label_for() {
+  case "$1" in
+    'CONTROL / ENTRY') echo 'Core Agents' ;;
+    '🦍 EXECUTION')    echo 'Review Agents' ;;
+    'Extra')           echo 'Extra Agents' ;;
+  esac
+}
 
 # ---------- サーバー管理 ----------
 
@@ -101,11 +109,22 @@ plan_contains() {
 #      （新規セッションの既定ワークスペースを w1 CORE として拾うため）
 #   3. どちらでもなければ新規作成する（既存セッションでは末尾に付く）
 resolve_workspace() {
-  local index="$1" label="$2" ws_id candidate_id candidate_label
+  local index="$1" label="$2" ws_id legacy_label legacy_id candidate_id candidate_label
 
   ws_id=$(ws_id_by_label "$label")
   if [ -n "$ws_id" ]; then
     echo "$ws_id"
+    return
+  fi
+
+  # 旧役割名は位置ではなくラベルで移行する。既存環境でReview Agentsが末尾に
+  # ある場合もExtra Agentsを誤ってEXECUTIONへ転用しない。
+  legacy_label=$(legacy_label_for "$label")
+  legacy_id=$(ws_id_by_label "$legacy_label")
+  if [ -n "$legacy_id" ]; then
+    echo "Renaming workspace: $legacy_label -> $label" >&2
+    herdr workspace rename "$legacy_id" "$label" >/dev/null
+    echo "$legacy_id"
     return
   fi
 
@@ -201,23 +220,23 @@ start_agent_if_missing() {
 
 start_server
 
-CORE_WS=$(resolve_workspace 0 'Core Agents')
-REVIEW_WS=$(resolve_workspace 1 'Review Agents')
-EXTRA_WS=$(resolve_workspace 2 'Extra Agents')
+CONTROL_WS=$(resolve_workspace 0 'CONTROL / ENTRY')
+EXECUTION_WS=$(resolve_workspace 1 '🦍 EXECUTION')
+EXTRA_WS=$(resolve_workspace 2 'Extra')
 
-# CORE: Windows 準拠。会社CC / 個人Codex / 個人CC / 会社Codex の2x2。
-init_pane_grid "$CORE_WS" 4
-apply_pane_labels "$CORE_WS" \
-  'Claude Work - Commander' 'Codex Personal - Plan/Build' \
-  'Claude Personal - Utility' 'Codex Work - Luna'
+# CONTROL / ENTRY: 相談窓口とTask Packet作成。CommanderはSupervisorではない。
+init_pane_grid "$CONTROL_WS" 4
+apply_pane_labels "$CONTROL_WS" \
+  'Commander - Claude Work / Opus 5' 'Sol - Codex Personal / GPT-5.6 Sol' \
+  'Utility - Claude Personal' 'Status - Shell'
 
-# REVIEW: 4枠すべて会社アカウント。並列レビュー前提（2026-08-31 新設）。
-init_pane_grid "$REVIEW_WS" 4
-apply_pane_labels "$REVIEW_WS" \
-  'Claude Work - Review A' 'Claude Work - Review B' \
-  'Claude Work - Review C' 'Claude Work - Review D'
+# EXECUTION: 入力はTask Packetのみ。MVPはReviewer Aのみで1 Loopずつ処理する。
+init_pane_grid "$EXECUTION_WS" 4
+apply_pane_labels "$EXECUTION_WS" \
+  'Supervisor - Claude Work / Opus 5' 'Reviewer A - Claude Work / Opus 5' \
+  'Worker A - Gemini 3.8 Flash' 'Worker B - Claude Work / Sonnet 5'
 
-# EXTRA: 予備枠。Codex Extra は REVIEW の二次レビュー用に都度使う。
+# EXTRA: 既存の予備4枠を維持する。
 init_pane_grid "$EXTRA_WS" 4
 apply_pane_labels "$EXTRA_WS" \
   'Grok' 'Antigravity CLI' 'Claude Work - Extra' 'Codex - Extra'
@@ -228,32 +247,40 @@ LIVE_PANE_IDS=$(live_agent_pane_ids)
 #   個人 = 既定の ~/.claude / 会社 = ~/.claude-work
 CLAUDE_WORK_DIR="$HOME/.claude-work"
 
-# --- CORE ---
-start_agent_if_missing "$(pane_id_by_label "$CORE_WS" 'Claude Work - Commander')" \
-  'Claude Work - Commander' \
+# --- CONTROL / ENTRY ---
+start_agent_if_missing "$(pane_id_by_label "$CONTROL_WS" 'Commander - Claude Work / Opus 5')" \
+  'Commander' \
   bash -c "export CLAUDE_CONFIG_DIR=$CLAUDE_WORK_DIR AGMSG_AGENT=commander; cd $WORK_ROOT && claude --model opus --name commander"
 
-start_agent_if_missing "$(pane_id_by_label "$CORE_WS" 'Codex Personal - Plan/Build')" \
-  'Codex Personal - Plan/Build' \
+start_agent_if_missing "$(pane_id_by_label "$CONTROL_WS" 'Sol - Codex Personal / GPT-5.6 Sol')" \
+  'Sol' \
   bash -c "export AGMSG_AGENT=codex-sol; cd $WORK_ROOT && $CODEX_ACCOUNT_SCRIPT personal"
 
-start_agent_if_missing "$(pane_id_by_label "$CORE_WS" 'Claude Personal - Utility')" \
-  'Claude Personal - Utility' \
-  bash -c "unset CLAUDE_CONFIG_DIR; export AGMSG_AGENT=jikko; cd $WORK_ROOT && claude --name jikko"
+start_agent_if_missing "$(pane_id_by_label "$CONTROL_WS" 'Utility - Claude Personal')" \
+  'Utility' \
+  bash -c "unset CLAUDE_CONFIG_DIR; export AGMSG_AGENT=utility; cd $WORK_ROOT && claude --name utility"
 
-start_agent_if_missing "$(pane_id_by_label "$CORE_WS" 'Codex Work - Luna')" \
-  'Codex Work - Luna' \
-  bash -c "export AGMSG_AGENT=codex-luna; cd $WORK_ROOT && $CODEX_ACCOUNT_SCRIPT work"
+# Statusは将来のgorilla status / Ledger / pending確認用。現時点ではShellのまま起動しない。
 
-# --- REVIEW（会社アカウント固定）---
+# --- EXECUTION ---
+start_agent_if_missing "$(pane_id_by_label "$EXECUTION_WS" 'Supervisor - Claude Work / Opus 5')" \
+  'Supervisor' \
+  bash -c "export CLAUDE_CONFIG_DIR=$CLAUDE_WORK_DIR AGMSG_AGENT=loop-supervisor; cd $WORK_ROOT && claude --model opus --name loop-supervisor"
+
 if [ "$SKIP_REVIEW" = false ]; then
-  for slot in A B C D; do
-    name="review-$(echo "$slot" | tr 'A-Z' 'a-z')"
-    start_agent_if_missing "$(pane_id_by_label "$REVIEW_WS" "Claude Work - Review $slot")" \
-      "Claude Work - Review $slot" \
-      bash -c "export CLAUDE_CONFIG_DIR=$CLAUDE_WORK_DIR AGMSG_AGENT=$name; cd $WORK_ROOT && claude --model opus --name $name"
-  done
+  start_agent_if_missing "$(pane_id_by_label "$EXECUTION_WS" 'Reviewer A - Claude Work / Opus 5')" \
+    'Reviewer A' \
+    bash -c "export CLAUDE_CONFIG_DIR=$CLAUDE_WORK_DIR AGMSG_AGENT=loop-review-a; cd $WORK_ROOT && claude --model opus --name loop-review-a"
 fi
+
+# Macでも既存のagyを使う。自動承認はONだが、既存の物理deny / guardrailは変更しない。
+start_agent_if_missing "$(pane_id_by_label "$EXECUTION_WS" 'Worker A - Gemini 3.8 Flash')" \
+  'Worker A - Gemini 3.8 Flash' \
+  bash -c "export AGMSG_AGENT=loop-worker-gemini; cd $WORK_ROOT && agy --model gemini-3.8-flash-medium --mode accept-edits --dangerously-skip-permissions"
+
+start_agent_if_missing "$(pane_id_by_label "$EXECUTION_WS" 'Worker B - Claude Work / Sonnet 5')" \
+  'Worker B - Sonnet 5' \
+  bash -c "export CLAUDE_CONFIG_DIR=$CLAUDE_WORK_DIR AGMSG_AGENT=loop-worker-sonnet; cd $WORK_ROOT && claude --model sonnet --name loop-worker-sonnet"
 
 # --- EXTRA（--skip-extra で丸ごと省略できる）---
 if [ "$SKIP_EXTRA" = false ]; then
@@ -274,7 +301,7 @@ if [ "$SKIP_EXTRA" = false ]; then
     bash -c "export AGMSG_AGENT=codex-extra; cd $WORK_ROOT && $CODEX_ACCOUNT_SCRIPT work"
 fi
 
-herdr workspace focus "$CORE_WS" >/dev/null 2>&1 || true
+herdr workspace focus "$CONTROL_WS" >/dev/null 2>&1 || true
 
 if [ "$CONFIGURE_ONLY" = false ]; then
   exec herdr
